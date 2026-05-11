@@ -43,7 +43,7 @@ backup_passphrase: "AUTRE_PASSPHRASE_POUR_BACKUPS"
 ## Étape 3 : Installer l'add-on
 
 1. Settings → Apps → ⋮ → Repositories
-2. Ajoute : `https://github.com/TON-USER/budget-multi-coloc`
+2. Ajoute : `https://github.com/DustProgram/budget-multi-coloc`
 3. Clique "Add"
 4. Dans le store, cherche "Budget Multi-Coloc" → Install
 

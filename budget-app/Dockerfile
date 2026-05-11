@@ -20,8 +20,8 @@ RUN npm run build
 FROM ${BUILD_FROM}
 
 # Métadonnées
-LABEL maintainer="Toi <toi@example.com>"
-LABEL org.opencontainers.image.source="https://github.com/TON-USER/budget-multi-coloc"
+LABEL maintainer="DustProgram"
+LABEL org.opencontainers.image.source="https://github.com/DustProgram/budget-multi-coloc"
 
 # Dépendances système minimales
 RUN apk add --no-cache \

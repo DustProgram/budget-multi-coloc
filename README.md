@@ -19,7 +19,7 @@
 ## 🚀 Installation rapide
 
 1. Dans Home Assistant : **Paramètres → Apps → Ajouter un dépôt**
-2. Coller l'URL : `https://github.com/TON-USER/budget-multi-coloc`
+2. Coller l'URL : `https://github.com/DustProgram/budget-multi-coloc`
 3. Installer l'add-on "Budget Multi-Coloc"
 4. Suivre [docs/INSTALL.md](docs/INSTALL.md) pour le setup de la clé USB chiffrée
 

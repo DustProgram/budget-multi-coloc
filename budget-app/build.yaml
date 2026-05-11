@@ -8,5 +8,5 @@ args:
 labels:
   org.opencontainers.image.title: "Budget Multi-Coloc"
   org.opencontainers.image.description: "Gestionnaire de budget multi-utilisateur pour Home Assistant"
-  org.opencontainers.image.source: "https://github.com/TON-USER/budget-multi-coloc"
+  org.opencontainers.image.source: "https://github.com/DustProgram/budget-multi-coloc"
   org.opencontainers.image.licenses: "MIT"

@@ -2,7 +2,7 @@ name: "Budget Multi-Coloc"
 version: "0.1.0"
 slug: "budget_multi_coloc"
 description: "Gestionnaire de budget personnel et colocation avec stockage chiffré"
-url: "https://github.com/TON-USER/budget-multi-coloc/tree/main/budget-app"
+url: "https://github.com/DustProgram/budget-multi-coloc/tree/main/budget-app"
 
 # Architectures supportées (HA Green = aarch64)
 arch:
@@ -69,7 +69,7 @@ schema:
 homeassistant: "2024.1.0"
 
 # Image Docker pré-buildée par GitHub Actions
-image: "ghcr.io/TON-USER/budget-multi-coloc-{arch}"
+image: "ghcr.io/dustprogram/budget-multi-coloc-{arch}"
 
 # Icône dans le store
 icon: "icon.png"
