@@ -44,8 +44,9 @@ apparmor: false             # AppArmor par défaut bloque dm-crypt / device-mapp
 privileged:                 # Caps minimales pour LUKS + montage dans le container
   - SYS_ADMIN              # mount(), cryptsetup luksOpen
   - SYS_RAWIO              # Accès aux block devices en raw
-  - MKNOD                  # cryptsetup crée /dev/mapper/<name>
   - DAC_READ_SEARCH        # Lire /dev/disk/by-uuid/... sans le mode root strict
+                           # (MKNOD n'est pas dans la liste blanche du supervisor :
+                           # udev crée /dev/mapper/<name> automatiquement)
 udev: true                  # Voir les clés USB qui apparaissent à chaud
 
 # Volumes persistants : data sur la clé USB chiffrée
