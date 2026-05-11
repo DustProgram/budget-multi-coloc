@@ -9,7 +9,8 @@ FROM node:20-alpine AS frontend-builder
 
 WORKDIR /build
 COPY frontend/package*.json ./
-RUN npm ci --omit=dev
+# Install everything: build tooling (tsc, vite, tailwind...) lives in devDependencies
+RUN npm ci
 
 COPY frontend/ ./
 RUN npm run build
