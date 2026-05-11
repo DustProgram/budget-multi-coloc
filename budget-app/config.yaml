@@ -1,0 +1,84 @@
+name: "Budget Multi-Coloc"
+version: "0.1.0"
+slug: "budget_multi_coloc"
+description: "Gestionnaire de budget personnel et colocation avec stockage chiffré"
+url: "https://github.com/TON-USER/budget-multi-coloc/tree/main/budget-app"
+
+# Architectures supportées (HA Green = aarch64)
+arch:
+  - aarch64
+  - amd64
+
+# Le port "ingress" : intégration native HA (sidebar + auth auto)
+ingress: true
+ingress_port: 8000
+ingress_stream: false
+panel_icon: "mdi:cash-multiple"
+panel_title: "Budget"
+panel_admin: false  # Tous les users HA peuvent voir l'icône, l'app filtre ensuite
+
+# Port externe optionnel pour accès direct à /courses et /coloc-summary
+ports:
+  8765/tcp: 8765
+ports_description:
+  8765/tcp: "Accès direct liste courses + coloc (optionnel)"
+
+# Permissions
+hassio_api: false
+homeassistant_api: false
+auth_api: true              # Récupérer la liste des users HA
+host_network: false
+privileged:
+  - SYS_ADMIN              # Nécessaire pour monter la clé USB LUKS
+devices:
+  - "/dev/sda1"            # La clé USB (peut être autre selon ton hard)
+  - "/dev/sdb1"
+  - "/dev/disk/by-uuid/CHANGE_ME"
+
+# Volumes persistants : data sur la clé USB chiffrée
+map:
+  - "backup:rw"            # Pour les backups mensuels
+  - "share:rw"             # Pour exports PDF
+
+# Configuration par défaut (modifiable dans l'UI HA)
+options:
+  usb_device: "/dev/disk/by-uuid/CHANGE_ME"
+  usb_mount_point: "/data"
+  log_level: "info"
+  backup_enabled: true
+  external_port_enabled: false
+  external_port_modules:
+    - "courses"
+    - "coloc-summary"
+  default_currency: "EUR"
+  default_locale: "fr_FR"
+
+schema:
+  usb_device: str
+  usb_mount_point: str
+  log_level: list(trace|debug|info|notice|warning|error|fatal)
+  backup_enabled: bool
+  external_port_enabled: bool
+  external_port_modules:
+    - list(courses|coloc-summary)
+  default_currency: list(EUR|USD|GBP|CHF)
+  default_locale: list(fr_FR|en_US)
+
+# Secrets HA (mot de passe LUKS)
+# À configurer dans secrets.yaml : luks_passphrase: "votre_phrase_secrète"
+homeassistant: "2024.1.0"
+
+# Image Docker pré-buildée par GitHub Actions
+image: "ghcr.io/TON-USER/budget-multi-coloc-{arch}"
+
+# Icône dans le store
+icon: "icon.png"
+logo: "logo.png"
+
+# Démarrage
+startup: services
+boot: auto
+init: false
+
+# Le service health-check FastAPI
+watchdog: "http://[HOST]:[PORT:8000]/api/health"
