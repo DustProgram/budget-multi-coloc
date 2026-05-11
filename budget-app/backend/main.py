@@ -14,7 +14,7 @@ from fastapi.responses import FileResponse
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
 
-from api import accounts, incomes, charges, transfers, savings, purchases, shopping, coloc, simulator, dashboard, health
+from api import accounts, incomes, charges, transfers, savings, purchases, shopping, coloc, simulator, dashboard, health, calendar as calendar_api
 from models.base import init_db
 from services.backup import perform_monthly_backup
 from services.auth import HAUserMiddleware
@@ -87,6 +87,7 @@ app.include_router(shopping.router, prefix="/api/shopping", tags=["shopping-list
 app.include_router(coloc.router, prefix="/api/coloc", tags=["coloc"])
 app.include_router(simulator.router, prefix="/api/simulator", tags=["simulator"])
 app.include_router(dashboard.router, prefix="/api/dashboard", tags=["dashboard"])
+app.include_router(calendar_api.router, prefix="/api/calendar", tags=["calendar"])
 
 # ===== Frontend statique (PWA) =====
 static_dir = Path(os.environ.get("STATIC_DIR", "/app/static"))

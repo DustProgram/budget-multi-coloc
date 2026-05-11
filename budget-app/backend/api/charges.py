@@ -1,34 +1,136 @@
+"""API Charges fixes - CRUD complet (filtré par user_id).
+
+Le calcul de la part personnelle est délégué à services.budget_calc.compute_my_share.
+Cet endpoint l'expose aussi via le champ `my_share` dans la sortie.
 """
-Stubs des endpoints API.
-À compléter avec Claude Code en suivant le pattern de shopping.py
-"""
-from fastapi import APIRouter, Depends, Request
+from decimal import Decimal
+from typing import Optional
+
+from fastapi import APIRouter, Depends, HTTPException, Request
+from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from models.base import get_db
+from models import Charge, Frequency, SplitMode, User
+from services.budget_calc import compute_my_share
 
 router = APIRouter()
 
 
-@router.get("/")
-async def list_(request: Request, db: Session = Depends(get_db)):
-    """TODO : implémenter par Claude Code en s'inspirant de shopping.py"""
-    return []
+class ChargeCreate(BaseModel):
+    label: str
+    total_amount: Decimal
+    frequency: Frequency = Frequency.MENSUELLE
+    day_of_month: int
+    month: Optional[int] = None
+    split_mode: SplitMode = SplitMode.PERSO
+    num_colocs: int = 1
+    split_value: Optional[Decimal] = None
+    account_id: Optional[int] = None
+    is_shared: bool = False
+    notes: Optional[str] = None
+    is_active: bool = True
 
 
-@router.post("/")
-async def create(request: Request, db: Session = Depends(get_db)):
-    """TODO"""
-    pass
+class ChargeUpdate(BaseModel):
+    label: Optional[str] = None
+    total_amount: Optional[Decimal] = None
+    frequency: Optional[Frequency] = None
+    day_of_month: Optional[int] = None
+    month: Optional[int] = None
+    split_mode: Optional[SplitMode] = None
+    num_colocs: Optional[int] = None
+    split_value: Optional[Decimal] = None
+    account_id: Optional[int] = None
+    is_shared: Optional[bool] = None
+    notes: Optional[str] = None
+    is_active: Optional[bool] = None
 
 
-@router.patch("/{item_id}")
-async def update(item_id: int, request: Request, db: Session = Depends(get_db)):
-    """TODO"""
-    pass
+class ChargeOut(BaseModel):
+    id: int
+    label: str
+    total_amount: Decimal
+    frequency: str
+    day_of_month: int
+    month: Optional[int]
+    split_mode: str
+    num_colocs: int
+    split_value: Optional[Decimal]
+    account_id: Optional[int]
+    is_shared: bool
+    notes: Optional[str]
+    is_active: bool
+    my_share: Decimal
+
+    class Config:
+        from_attributes = True
 
 
-@router.delete("/{item_id}")
-async def delete(item_id: int, db: Session = Depends(get_db)):
-    """TODO"""
-    pass
+def _to_out(charge: Charge) -> ChargeOut:
+    out = ChargeOut.model_validate(charge)
+    out.my_share = compute_my_share(charge)
+    return out
+
+
+@router.get("/", response_model=list[ChargeOut])
+async def list_charges(
+    request: Request,
+    db: Session = Depends(get_db),
+    include_inactive: bool = False,
+):
+    user: User = request.state.user
+    q = db.query(Charge).filter(Charge.user_id == user.id)
+    if not include_inactive:
+        q = q.filter(Charge.is_active.is_(True))
+    return [_to_out(c) for c in q.order_by(Charge.day_of_month).all()]
+
+
+@router.post("/", response_model=ChargeOut, status_code=201)
+async def create_charge(
+    request: Request,
+    payload: ChargeCreate,
+    db: Session = Depends(get_db),
+):
+    user: User = request.state.user
+    ch = Charge(**payload.model_dump(), user_id=user.id)
+    db.add(ch)
+    db.commit()
+    db.refresh(ch)
+    return _to_out(ch)
+
+
+@router.patch("/{charge_id}", response_model=ChargeOut)
+async def update_charge(
+    charge_id: int,
+    request: Request,
+    payload: ChargeUpdate,
+    db: Session = Depends(get_db),
+):
+    user: User = request.state.user
+    ch = db.query(Charge).filter(
+        Charge.id == charge_id, Charge.user_id == user.id,
+    ).first()
+    if not ch:
+        raise HTTPException(404, "Charge introuvable")
+    for k, v in payload.model_dump(exclude_unset=True).items():
+        setattr(ch, k, v)
+    db.commit()
+    db.refresh(ch)
+    return _to_out(ch)
+
+
+@router.delete("/{charge_id}", status_code=204)
+async def delete_charge(
+    charge_id: int,
+    request: Request,
+    db: Session = Depends(get_db),
+):
+    user: User = request.state.user
+    ch = db.query(Charge).filter(
+        Charge.id == charge_id, Charge.user_id == user.id,
+    ).first()
+    if not ch:
+        raise HTTPException(404, "Charge introuvable")
+    db.delete(ch)
+    db.commit()
