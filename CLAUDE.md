@@ -119,4 +119,4 @@ docker build -t budget-test .
 - Cartes dashboard HA personnalisées (lovelace cards)
 - Import CSV depuis relevés bancaires
 - Export OFX pour comptabilité
-- Mode "famille" avec sous-comptes enfants
+- Calendrier (Un calendrier avec les événements a venir, Exemple: le jour ou passera la gaz avec en cliquant une estimation de l'état du compte apres validation)
