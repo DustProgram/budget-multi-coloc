@@ -4,10 +4,21 @@ slug: "budget_multi_coloc"
 description: "Gestionnaire de budget personnel et colocation avec stockage chiffré"
 url: "https://github.com/DustProgram/budget-multi-coloc/tree/main/budget-app"
 
+# Version minimale de Home Assistant requise
+homeassistant: "2024.1.0"
+
 # Architectures supportées (HA Green = aarch64)
 arch:
   - aarch64
   - amd64
+
+# Image Docker pré-buildée par GitHub Actions
+image: "ghcr.io/dustprogram/budget-multi-coloc-{arch}"
+
+# Démarrage
+startup: services
+boot: auto
+init: false
 
 # Le port "ingress" : intégration native HA (sidebar + auth auto)
 ingress: true
@@ -30,19 +41,19 @@ auth_api: true              # Récupérer la liste des users HA
 host_network: false
 privileged:
   - SYS_ADMIN              # Nécessaire pour monter la clé USB LUKS
-devices:
-  - "/dev/sda1"            # La clé USB (peut être autre selon ton hard)
-  - "/dev/sdb1"
-  - "/dev/disk/by-uuid/CHANGE_ME"
+udev: true                 # Voir les clés USB qui apparaissent à chaud
 
 # Volumes persistants : data sur la clé USB chiffrée
 map:
   - "backup:rw"            # Pour les backups mensuels
   - "share:rw"             # Pour exports PDF
 
+# Le service health-check FastAPI
+watchdog: "http://[HOST]:[PORT:8000]/api/health"
+
 # Configuration par défaut (modifiable dans l'UI HA)
 options:
-  usb_device: "/dev/disk/by-uuid/CHANGE_ME"
+  usb_device: ""
   usb_mount_point: "/data"
   log_level: "info"
   backup_enabled: true
@@ -54,31 +65,12 @@ options:
   default_locale: "fr_FR"
 
 schema:
-  usb_device: str
+  usb_device: "str?"
   usb_mount_point: str
-  log_level: list(trace|debug|info|notice|warning|error|fatal)
+  log_level: "list(trace|debug|info|notice|warning|error|fatal)"
   backup_enabled: bool
   external_port_enabled: bool
   external_port_modules:
-    - list(courses|coloc-summary)
-  default_currency: list(EUR|USD|GBP|CHF)
-  default_locale: list(fr_FR|en_US)
-
-# Secrets HA (mot de passe LUKS)
-# À configurer dans secrets.yaml : luks_passphrase: "votre_phrase_secrète"
-homeassistant: "2024.1.0"
-
-# Image Docker pré-buildée par GitHub Actions
-image: "ghcr.io/dustprogram/budget-multi-coloc-{arch}"
-
-# Icône dans le store
-icon: "icon.png"
-logo: "logo.png"
-
-# Démarrage
-startup: services
-boot: auto
-init: false
-
-# Le service health-check FastAPI
-watchdog: "http://[HOST]:[PORT:8000]/api/health"
+    - "list(courses|coloc-summary)"
+  default_currency: "list(EUR|USD|GBP|CHF)"
+  default_locale: "list(fr_FR|en_US)"

@@ -1,0 +1,11 @@
+# Force LF line endings for everything that runs inside the Alpine container.
+# Without this, a Windows clone would check out shell scripts with CRLF, and
+# the s6 init in the HA addon base image fails to exec `#!/usr/bin/with-contenv bashio\r`.
+*.sh        text eol=lf
+Dockerfile  text eol=lf
+*.yaml      text eol=lf
+*.yml       text eol=lf
+
+# s6 service scripts have no extension — pin them too.
+budget-app/rootfs/etc/services.d/**  text eol=lf
+budget-app/rootfs/etc/cont-init.d/** text eol=lf

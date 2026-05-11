@@ -10,10 +10,18 @@ LUKS_NAME="budget_encrypted"
 
 bashio::log.info "🔐 Initialisation du stockage chiffré..."
 
+# Vérifier que l'option est renseignée
+if bashio::var.is_empty "${USB_DEVICE}"; then
+    bashio::log.error "❌ Option 'usb_device' non configurée."
+    bashio::log.error "Ouvre l'onglet Configuration de l'add-on et renseigne le chemin"
+    bashio::log.error "(ex. /dev/disk/by-uuid/xxxx-xxxx) puis redémarre."
+    exit 1
+fi
+
 # Vérifier la présence de la clé USB
 if [ ! -b "${USB_DEVICE}" ]; then
     bashio::log.error "❌ Clé USB introuvable : ${USB_DEVICE}"
-    bashio::log.error "Branche la clé et redémarre l'add-on."
+    bashio::log.error "Branche la clé puis redémarre l'add-on."
     exit 1
 fi
 bashio::log.info "✅ Clé USB détectée : ${USB_DEVICE}"
