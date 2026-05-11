@@ -3,6 +3,11 @@ import react from '@vitejs/plugin-react';
 import { VitePWA } from 'vite-plugin-pwa';
 
 export default defineConfig({
+  // Chemins relatifs pour que les assets se chargent correctement quand
+  // l'app est servie derrière /api/hassio_ingress/<token>/ par le supervisor.
+  // Sans ça, le <script src="/assets/..."> du index.html buildé fait 404
+  // sur la racine de HA au lieu d'être préfixé par le path d'ingress.
+  base: './',
   plugins: [
     react(),
     VitePWA({
