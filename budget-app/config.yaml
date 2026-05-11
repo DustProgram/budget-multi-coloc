@@ -39,9 +39,14 @@ hassio_api: false
 homeassistant_api: false
 auth_api: true              # Récupérer la liste des users HA
 host_network: false
-privileged:
-  - SYS_ADMIN              # Nécessaire pour monter la clé USB LUKS
-udev: true                 # Voir les clés USB qui apparaissent à chaud
+host_dbus: true             # Reçoit les événements udev quand on plug/déplug une clé
+apparmor: false             # AppArmor par défaut bloque dm-crypt / device-mapper
+privileged:                 # Caps minimales pour LUKS + montage dans le container
+  - SYS_ADMIN              # mount(), cryptsetup luksOpen
+  - SYS_RAWIO              # Accès aux block devices en raw
+  - MKNOD                  # cryptsetup crée /dev/mapper/<name>
+  - DAC_READ_SEARCH        # Lire /dev/disk/by-uuid/... sans le mode root strict
+udev: true                  # Voir les clés USB qui apparaissent à chaud
 
 # Volumes persistants : data sur la clé USB chiffrée
 map:
