@@ -68,9 +68,22 @@ class ChargeOut(BaseModel):
 
 
 def _to_out(charge: Charge) -> ChargeOut:
-    out = ChargeOut.model_validate(charge)
-    out.my_share = compute_my_share(charge)
-    return out
+    return ChargeOut(
+        id=charge.id,
+        label=charge.label,
+        total_amount=charge.total_amount,
+        frequency=charge.frequency.value if hasattr(charge.frequency, "value") else charge.frequency,
+        day_of_month=charge.day_of_month,
+        month=charge.month,
+        split_mode=charge.split_mode.value if hasattr(charge.split_mode, "value") else charge.split_mode,
+        num_colocs=charge.num_colocs,
+        split_value=charge.split_value,
+        account_id=charge.account_id,
+        is_shared=charge.is_shared,
+        notes=charge.notes,
+        is_active=charge.is_active,
+        my_share=compute_my_share(charge),
+    )
 
 
 @router.get("/", response_model=list[ChargeOut])
