@@ -16,6 +16,9 @@ node_modules/
 dist/
 .vite/
 *.log
+*.tsbuildinfo
+budget-app/frontend/vite.config.js
+budget-app/frontend/vite.config.d.ts
 
 # Données locales (jamais commit)
 *.db
@@ -38,3 +41,4 @@ Thumbs.db
 .vscode/
 .idea/
 *.swp
+.claude/

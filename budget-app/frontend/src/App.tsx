@@ -13,6 +13,7 @@ import { MonthlyView } from './pages/MonthlyView';
 import { YearlyView } from './pages/YearlyView';
 import { Shopping } from './pages/Shopping';
 import { ColocSummary } from './pages/ColocSummary';
+import { Calendar } from './pages/Calendar';
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -36,6 +37,7 @@ export default function App() {
           <Route element={<Layout />}>
             <Route index element={<Navigate to="/dashboard" replace />} />
             <Route path="dashboard" element={<Dashboard />} />
+            <Route path="calendar" element={<Calendar />} />
             <Route path="accounts" element={<Accounts />} />
             <Route path="incomes" element={<Incomes />} />
             <Route path="charges" element={<Charges />} />
