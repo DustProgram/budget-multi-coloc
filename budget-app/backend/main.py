@@ -7,10 +7,10 @@ import os
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, HTMLResponse
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
 
@@ -94,12 +94,28 @@ static_dir = Path(os.environ.get("STATIC_DIR", "/app/static"))
 if static_dir.exists():
     app.mount("/assets", StaticFiles(directory=static_dir / "assets"), name="assets")
 
-    @app.get("/{full_path:path}")
+    @app.get("/{full_path:path}", include_in_schema=False)
     async def serve_spa(request: Request, full_path: str):
-        """Catch-all pour la SPA React (gère le routing client-side)."""
-        # Routes API non gérées ici
-        if full_path.startswith("api/"):
-            return {"detail": "Not Found"}, 404
+        """Catch-all pour la SPA React (gère le routing client-side).
 
-        # Sinon, on sert index.html (le router React prend le relais)
-        return FileResponse(static_dir / "index.html")
+        Réécrit les paths relatifs (./assets/...) du index.html produit
+        par Vite vers des paths absolus préfixés par X-Ingress-Path,
+        que le supervisor HA envoie sur chaque requête ingress. Sans ça
+        le navigateur résout `./` à la racine de l'host HA et 404 sur
+        les bundles JS/CSS.
+        """
+        if full_path.startswith("api/"):
+            raise HTTPException(status_code=404)
+
+        # Sert un fichier statique racine (manifest.webmanifest, registerSW.js, sw.js, icônes…)
+        if full_path:
+            candidate = static_dir / full_path
+            if candidate.is_file() and candidate.resolve().is_relative_to(static_dir.resolve()):
+                return FileResponse(candidate)
+
+        # Sinon : index.html avec réécriture du base path
+        ingress_path = request.headers.get("X-Ingress-Path", "").rstrip("/")
+        index_html = (static_dir / "index.html").read_text(encoding="utf-8")
+        if ingress_path:
+            index_html = index_html.replace('="./', f'="{ingress_path}/')
+        return HTMLResponse(index_html)
