@@ -48,6 +48,9 @@ privileged:                 # Caps minimales pour LUKS + montage dans le contain
                            # (MKNOD n'est pas dans la liste blanche du supervisor :
                            # udev crée /dev/mapper/<name> automatiquement)
 udev: true                  # Voir les clés USB qui apparaissent à chaud
+full_access: true           # Accès cgroup rwm sur tous les block devices host -
+                            # indispensable pour cryptsetup luksOpen sur /dev/sdX
+                            # (les caps seules ne suffisent pas sans la règle cgroup)
 
 # Volumes persistants : data sur la clé USB chiffrée
 map:
