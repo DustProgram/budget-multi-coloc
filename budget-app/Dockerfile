@@ -23,9 +23,10 @@ FROM ${BUILD_FROM}
 LABEL maintainer="DustProgram"
 LABEL org.opencontainers.image.source="https://github.com/DustProgram/budget-multi-coloc"
 
-# Dépendances système minimales
+# Dépendances système minimales. Pas de pin de version Python : on prend
+# la 3.x fournie par la base HA. Le code marche sur 3.11+ (testé jusqu'à 3.13).
 RUN apk add --no-cache \
-    python3=~3.12 \
+    python3 \
     py3-pip \
     cryptsetup \
     gnupg \
