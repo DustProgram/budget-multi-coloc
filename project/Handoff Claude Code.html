@@ -1,0 +1,327 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1"/>
+<title>Handoff — Compte Gestion · Claude Code Web</title>
+<link rel="preconnect" href="https://fonts.googleapis.com"/>
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin/>
+<link href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=Geist:wght@300;400;500;600;700&family=Geist+Mono:wght@400;500&display=swap" rel="stylesheet"/>
+<link rel="stylesheet" href="styles.css"/>
+<style>
+  .doc { max-width: 880px; margin: 0 auto; padding: 48px 32px 120px; }
+  .doc h1 { font-family: var(--display); font-size: 56px; line-height: 1; margin: 0 0 8px; letter-spacing: -.01em; }
+  .doc h2 { font-family: var(--display); font-size: 32px; margin: 56px 0 8px; letter-spacing: -.005em; }
+  .doc h3 { font-family: var(--body); font-size: 15px; font-weight: 600; text-transform: uppercase; letter-spacing: .08em; color: var(--ink-3); margin: 32px 0 12px; }
+  .doc p { line-height: 1.6; color: var(--ink-2); }
+  .doc .lede { font-family: var(--display); font-size: 22px; line-height: 1.35; color: var(--ink-2); max-width: 640px; margin: 0 0 32px; }
+  .doc ul { padding-left: 0; list-style: none; }
+  .doc ul li { padding: 12px 0; border-bottom: 1px dashed var(--line); display: grid; grid-template-columns: 28px 1fr auto; gap: 14px; align-items: start; }
+  .doc ul li:last-child { border-bottom: 0; }
+  .doc ul li .n { font-family: var(--mono); font-size: 11px; color: var(--ink-4); padding-top: 2px; }
+  .doc ul li .meta { font-family: var(--mono); font-size: 11px; color: var(--ink-3); padding-top: 2px; }
+  .doc code { font-family: var(--mono); font-size: 13px; background: var(--bg-sunken); padding: 1px 6px; border-radius: 4px; }
+  .doc pre { font-family: var(--mono); font-size: 12.5px; background: #14130f; color: #f5f1e8; padding: 16px 20px; border-radius: var(--radius); overflow-x: auto; line-height: 1.55; }
+  .doc pre .c { color: #918b7d; }
+  .doc pre .k { color: #c97155; }
+  .doc pre .s { color: #6e8c70; }
+  [data-theme="night"] .doc pre { background: #0a0908; }
+  .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+  @media (max-width: 720px) { .grid-2 { grid-template-columns: 1fr; } .doc h1 { font-size: 40px; } .doc { padding: 24px 18px 80px; } }
+  .pill-row { display: flex; gap: 6px; flex-wrap: wrap; margin: 8px 0 0; }
+  .card.spec { padding: 20px 22px; }
+  .card.spec h4 { font-family: var(--display); font-size: 22px; margin: 0 0 4px; }
+  .card.spec p { margin: 0; font-size: 14px; color: var(--ink-3); }
+  .stack { display: flex; gap: 8px; flex-wrap: wrap; }
+  .step {
+    border-left: 2px solid var(--accent);
+    padding: 4px 0 4px 20px;
+    margin: 16px 0;
+  }
+  .step strong { display: block; font-family: var(--display); font-size: 22px; margin-bottom: 4px; }
+  .toc { background: var(--bg-elev); border: 1px solid var(--line); border-radius: var(--radius); padding: 20px 24px; margin: 0 0 48px; }
+  .toc ol { margin: 0; padding-left: 20px; columns: 2; column-gap: 32px; }
+  .toc ol li { padding: 4px 0; border: 0; display: list-item; }
+  .toc a { color: var(--ink-2); text-decoration: none; }
+  .toc a:hover { color: var(--accent); }
+  @media (max-width: 640px) { .toc ol { columns: 1; } }
+</style>
+</head>
+<body style="background: var(--bg);">
+<div class="doc">
+  <p class="eyebrow">Handoff · v1.2 → v2.0</p>
+  <h1>Compte gestion → prod.</h1>
+  <p class="lede">Plan d'intégration pour passer le prototype à une vraie app, déployée depuis Claude Code Web vers ton repo GitHub. Liste des modules à coder, dans l'ordre.</p>
+
+  <div class="toc">
+    <strong style="font-family: var(--body); font-size: 13px; text-transform: uppercase; letter-spacing: .08em; color: var(--ink-3);">Sommaire</strong>
+    <ol style="margin-top: 10px;">
+      <li><a href="#stack">1. Stack technique</a></li>
+      <li><a href="#repo">2. Structure du repo</a></li>
+      <li><a href="#data">3. Modèle de données</a></li>
+      <li><a href="#auth">4. Auth & multi-utilisateurs</a></li>
+      <li><a href="#joint">5. Comptes joints partagés</a></li>
+      <li><a href="#bank">6. Connexion bancaire</a></li>
+      <li><a href="#pages">7. Pages à coder</a></li>
+      <li><a href="#pro">8. Module pro / compta</a></li>
+      <li><a href="#deploy">9. Setup Claude Code → GitHub</a></li>
+      <li><a href="#prompts">10. Prompts Claude Code</a></li>
+      <li><a href="#roadmap">11. Roadmap par sprints</a></li>
+    </ol>
+  </div>
+
+  <h2 id="stack">1. Stack technique</h2>
+  <p>Stack proposée — légère, déployable Vercel/Railway, compatible mobile via PWA dès le départ.</p>
+  <div class="grid-2">
+    <div class="card spec">
+      <p class="eyebrow">Frontend</p>
+      <h4>Next.js 15 · App Router</h4>
+      <p>React 19, TypeScript strict, Tailwind v4 + tokens CSS repris du prototype.</p>
+      <div class="pill-row"><span class="pill">Next 15</span><span class="pill">TS</span><span class="pill">Tailwind</span><span class="pill">shadcn/ui</span></div>
+    </div>
+    <div class="card spec">
+      <p class="eyebrow">Backend</p>
+      <h4>Supabase</h4>
+      <p>Auth, Postgres, Row Level Security pour les comptes joints multi-users, Realtime pour la coloc.</p>
+      <div class="pill-row"><span class="pill sage">Postgres</span><span class="pill sage">RLS</span><span class="pill sage">Realtime</span></div>
+    </div>
+    <div class="card spec">
+      <p class="eyebrow">Bancaire</p>
+      <h4>GoCardless Bank API</h4>
+      <p>(ex-Nordigen) — gratuit, agrégation PSD2 pour Boursorama, Crédit Mutuel, Qonto, etc.</p>
+      <div class="pill-row"><span class="pill plum">PSD2</span><span class="pill plum">EU</span></div>
+    </div>
+    <div class="card spec">
+      <p class="eyebrow">UI / Charts</p>
+      <h4>Recharts + Framer Motion</h4>
+      <p>Garder Instrument Serif pour les chiffres + Geist body. Framer pour les transitions opt-in.</p>
+      <div class="pill-row"><span class="pill">Recharts</span><span class="pill">Framer</span></div>
+    </div>
+  </div>
+
+  <h2 id="repo">2. Structure du repo</h2>
+<pre><span class="c">compte-gestion/</span>
+├── <span class="k">app/</span>
+│   ├── (auth)/login, signup, reset
+│   ├── (app)/dashboard, calendar, yearly,
+│   │         accounts, incomes, charges, transfers,
+│   │         savings, purchases, simulator, coloc,
+│   │         shopping, compta-pro
+│   ├── api/
+│   │   ├── bank/link/route.ts        <span class="c">// GoCardless flow</span>
+│   │   ├── bank/sync/route.ts        <span class="c">// cron daily</span>
+│   │   ├── coloc/invite/route.ts
+│   │   └── webhooks/bank/route.ts
+│   └── layout.tsx
+├── <span class="k">components/</span>
+│   ├── ui/                           <span class="c">// shadcn primitives</span>
+│   ├── charts/                       <span class="c">// BalanceCurve, Heatmap, Donut</span>
+│   ├── coloc/                        <span class="c">// FlowDiagram, ShoppingItem</span>
+│   ├── shell/Sidebar, MobileNav, SpaceSwitcher
+│   └── tweaks/TweaksPanel
+├── <span class="k">lib/</span>
+│   ├── db/schema.ts                  <span class="c">// Drizzle</span>
+│   ├── db/queries/
+│   ├── bank/gocardless.ts
+│   ├── auth.ts                       <span class="c">// Supabase helpers</span>
+│   └── money.ts                      <span class="c">// eur(), split logic</span>
+├── <span class="k">supabase/</span>
+│   ├── migrations/
+│   └── policies/                     <span class="c">// RLS par table</span>
+└── <span class="k">tests/</span> (Vitest + Playwright)</pre>
+
+  <h2 id="data">3. Modèle de données</h2>
+  <p>Schéma Drizzle. Tout doit passer par RLS — un user ne voit que ses propres comptes + les comptes joints où il est membre.</p>
+<pre><span class="k">users</span>          (id, email, name, color, initial, created_at)
+<span class="k">spaces</span>         (id, user_id, kind: 'perso'|'pro', label)
+<span class="k">accounts</span>       (id, space_id, bank, type, name, iban, color,
+                initial_balance, currency)
+<span class="k">account_members</span> (account_id, user_id, role: 'owner'|'cotitulaire'|'viewer')
+                <span class="c">// ← clé pour comptes joints multi-users</span>
+<span class="k">categories</span>     (id, space_id, label, kind, color)
+<span class="k">incomes</span>        (id, account_id, source, amount, day, type,
+                recurrence, created_by)
+<span class="k">charges</span>        (id, account_id, label, total, day, split_mode,
+                shared, payer_id, created_by)
+<span class="k">charge_splits</span>  (charge_id, user_id, amount, settled_at)
+                <span class="c">// répartition par coloc, settled quand remboursé</span>
+<span class="k">savings_rules</span>  (id, source_account_id, dest_account_id,
+                amount, day, label)
+<span class="k">purchases</span>      (id, account_id, desc, total, installments,
+                monthly, category_id, date)
+<span class="k">transactions</span>   (id, account_id, date, amount, label,
+                category_id, raw_payload, source: 'manual'|'bank')
+<span class="k">shopping_items</span> (id, household_id, label, qty, category,
+                priority, est, bought_at, bought_by, added_by)
+<span class="k">households</span>     (id, name, address)
+<span class="k">household_members</span> (household_id, user_id, share_pct)
+<span class="k">invitations</span>    (id, household_id|account_id, email, token,
+                accepted_at, expires_at)</pre>
+
+  <h2 id="auth">4. Auth & multi-utilisateurs</h2>
+  <ul>
+    <li><span class="n">4.1</span><div><strong>Magic link Supabase</strong><br/><span class="muted small">Email-only login. Pas de mot de passe. Session JWT 7 jours.</span></div><span class="meta">~2h</span></li>
+    <li><span class="n">4.2</span><div><strong>Profil utilisateur</strong><br/><span class="muted small">Onboarding : prénom, couleur d'avatar, initiale. Stocké sur <code>users</code>.</span></div><span class="meta">~1h</span></li>
+    <li><span class="n">4.3</span><div><strong>Spaces (Perso/Pro)</strong><br/><span class="muted small">À l'inscription, créer auto un <code>space</code> perso. Le space pro est créé à la demande depuis Tweaks.</span></div><span class="meta">~2h</span></li>
+    <li><span class="n">4.4</span><div><strong>Switcher d'espace</strong><br/><span class="muted small">Déjà UI dans le proto. Brancher sur un cookie <code>active_space_id</code> + middleware Next.</span></div><span class="meta">~1h</span></li>
+    <li><span class="n">4.5</span><div><strong>RLS policies</strong><br/><span class="muted small">Politique par table : <code>auth.uid() IN (SELECT user_id FROM account_members WHERE account_id = …)</code></span></div><span class="meta">~3h</span></li>
+  </ul>
+
+  <h2 id="joint">5. Comptes joints partagés (priorité)</h2>
+  <p>Le cœur du produit. La table <code>account_members</code> est ce qui rend le compte joint lié à plusieurs utilisateurs réels — pas juste des "noms" dans une coloc fictive.</p>
+
+  <div class="step">
+    <strong>5.1 — Créer un compte joint</strong>
+    Form : nom, banque, type, IBAN optionnel, solde initial. Créateur ajouté en <code>owner</code>.
+  </div>
+  <div class="step">
+    <strong>5.2 — Inviter un co-titulaire</strong>
+    Email → row dans <code>invitations</code> avec token. Email envoyé via Resend. Lien d'acceptation → ajoute à <code>account_members</code> en <code>cotitulaire</code>.
+  </div>
+  <div class="step">
+    <strong>5.3 — Synchronisation Realtime</strong>
+    Channel Supabase <code>account:{id}</code>. Toute insertion/modif sur <code>charges</code>, <code>transactions</code>, <code>shopping_items</code> broadcast à tous les membres.
+  </div>
+  <div class="step">
+    <strong>5.4 — Répartition automatique</strong>
+    À la création d'une charge sur compte joint, générer les <code>charge_splits</code> selon le mode (égal / par parts / par % du <code>household_members.share_pct</code>).
+  </div>
+  <div class="step">
+    <strong>5.5 — Règlement entre coloc</strong>
+    Bouton "Marquer remboursé" → set <code>settled_at</code>. Vue récap (déjà mockée dans le proto) calcule "qui doit à qui" en simplifiant le graphe.
+  </div>
+
+  <h2 id="bank">6. Connexion bancaire</h2>
+  <ul>
+    <li><span class="n">6.1</span><div><strong>GoCardless Bank Account Data</strong><br/><span class="muted small">Créer un EUA (End User Agreement) → flow OAuth banque → store <code>requisition_id</code> + <code>account_ids</code> sur <code>accounts</code>.</span></div><span class="meta">~1j</span></li>
+    <li><span class="n">6.2</span><div><strong>Sync quotidien</strong><br/><span class="muted small">Cron Vercel <code>/api/bank/sync</code> à 6h. Fetch transactions des 7 derniers jours, dédup par <code>transaction_id</code> bancaire, insert dans <code>transactions</code>.</span></div><span class="meta">~6h</span></li>
+    <li><span class="n">6.3</span><div><strong>Catégorisation auto</strong><br/><span class="muted small">Règles regex sur libellé → category_id. Override manuel possible. Stocker l'apprentissage par user.</span></div><span class="meta">~1j</span></li>
+    <li><span class="n">6.4</span><div><strong>Réconciliation</strong><br/><span class="muted small">Matcher les transactions importées avec les <code>charges</code> attendues du mois. Statut : prévue / payée / en retard.</span></div><span class="meta">~1j</span></li>
+  </ul>
+
+  <h2 id="pages">7. Pages à coder (reprise du proto)</h2>
+  <ul>
+    <li><span class="n">7.1</span><div><strong>Tableau de bord</strong><br/><span class="muted small">KPIs réels, courbe de solde projetée à 30 jours (extrapoler depuis charges récurrentes), donut répartition.</span></div><span class="meta">M1</span></li>
+    <li><span class="n">7.2</span><div><strong>Calendrier mensuel</strong><br/><span class="muted small">Drag-and-drop pour reprogrammer une charge. Click jour → drawer avec détail.</span></div><span class="meta">M1</span></li>
+    <li><span class="n">7.3</span><div><strong>Vue annuelle</strong><br/><span class="muted small">Heatmap + 12 barres. Click mois → drill-down. Switch métrique (revenus / charges / net / épargne).</span></div><span class="meta">M2</span></li>
+    <li><span class="n">7.4</span><div><strong>Comptes (déjà avec membres)</strong><br/><span class="muted small">Ajouter modale "Inviter co-titulaire" + liste des membres avec rôle modifiable.</span></div><span class="meta">M1</span></li>
+    <li><span class="n">7.5</span><div><strong>Charges / Revenus / Virements / Épargne / Achats</strong><br/><span class="muted small">CRUD complet, édition inline, récurrence (RRULE), import CSV pour bootstrap.</span></div><span class="meta">M2</span></li>
+    <li><span class="n">7.6</span><div><strong>Simulateur</strong><br/><span class="muted small">Server action qui rejoue le mois avec l'achat ajouté. Verdict animé. Sauver scénarios.</span></div><span class="meta">M2</span></li>
+    <li><span class="n">7.7</span><div><strong>Coloc — qui doit à qui</strong><br/><span class="muted small">Calcul de simplification de dettes (algo min-cash-flow). Boutons "Rembourser via Lydia / virement".</span></div><span class="meta">M1</span></li>
+    <li><span class="n">7.8</span><div><strong>Courses partagées</strong><br/><span class="muted small">Realtime. Push notif quand quelqu'un coche un article. Suggestion auto basée sur l'historique.</span></div><span class="meta">M2</span></li>
+  </ul>
+
+  <h2 id="pro">8. Module pro / compta</h2>
+  <ul>
+    <li><span class="n">8.1</span><div><strong>Calcul URSSAF automatique</strong><br/><span class="muted small">À chaque encaissement client → provision = montant × taux (configurable). Virement auto vers compte provision.</span></div><span class="meta">M3</span></li>
+    <li><span class="n">8.2</span><div><strong>Factures</strong><br/><span class="muted small">Génération PDF (react-pdf), envoi email, lien de paiement Stripe optionnel, relances auto à J+30.</span></div><span class="meta">M3</span></li>
+    <li><span class="n">8.3</span><div><strong>Export comptable</strong><br/><span class="muted small">CSV/FEC pour le cabinet. Filtre par période + catégorie pro. Webhook pour push automatique chez le comptable.</span></div><span class="meta">M3</span></li>
+    <li><span class="n">8.4</span><div><strong>TVA tracking</strong><br/><span class="muted small">Compteur seuil franchise. Alerte à 80% du plafond. Bascule statut TVA automatique.</span></div><span class="meta">M3</span></li>
+  </ul>
+
+  <h2 id="deploy">9. Setup Claude Code → GitHub</h2>
+  <p>Setup initial pour que Claude Code Web puisse pusher direct sur ton repo. À faire <strong>une fois</strong>.</p>
+
+  <h3>9.1 — Créer le repo GitHub</h3>
+<pre><span class="c"># En local ou via gh.io</span>
+gh repo create compte-gestion --private --description "App de gestion budget perso + coloc + pro"
+cd compte-gestion
+git init && git branch -M main</pre>
+
+  <h3>9.2 — Bootstrap Next.js</h3>
+<pre>npx create-next-app@latest . --typescript --tailwind --app --src-dir=false --import-alias="@/*"
+npm i @supabase/supabase-js @supabase/ssr drizzle-orm postgres
+npm i recharts framer-motion lucide-react
+npm i -D drizzle-kit @types/node vitest @playwright/test
+npx shadcn@latest init</pre>
+
+  <h3>9.3 — Variables d'environnement</h3>
+<pre><span class="c"># .env.local</span>
+NEXT_PUBLIC_SUPABASE_URL=
+NEXT_PUBLIC_SUPABASE_ANON_KEY=
+SUPABASE_SERVICE_ROLE_KEY=
+DATABASE_URL=
+GOCARDLESS_SECRET_ID=
+GOCARDLESS_SECRET_KEY=
+RESEND_API_KEY=
+NEXTAUTH_SECRET=</pre>
+
+  <h3>9.4 — Connecter Claude Code Web</h3>
+  <ol style="line-height: 1.8; color: var(--ink-2); padding-left: 20px;">
+    <li>Aller sur <code>claude.com/code</code> → "Connect GitHub".</li>
+    <li>Autoriser l'app Claude sur l'org/le compte qui contient <code>compte-gestion</code>.</li>
+    <li>Dans le picker de repo, sélectionner <code>compte-gestion</code> + branche <code>main</code>.</li>
+    <li>Activer "Auto-commit & push" pour que chaque session pousse direct.</li>
+  </ol>
+
+  <h3>9.5 — Premier push depuis ce projet</h3>
+<pre><span class="c"># Copier ces fichiers du proto comme référence visuelle</span>
+git add styles.css data.js pages.jsx shell.jsx app.jsx
+git commit -m "design: import prototype reference files"
+git remote add origin git@github.com:&lt;you&gt;/compte-gestion.git
+git push -u origin main</pre>
+
+  <h2 id="prompts">10. Prompts Claude Code (à copier-coller)</h2>
+  <p>Une fois le repo connecté à Claude Code Web, lancer ces prompts dans l'ordre. Chacun = une PR.</p>
+
+  <div class="step">
+    <strong>Prompt 1 — Setup Supabase + schema</strong>
+    <p style="margin-top: 8px; font-family: var(--mono); font-size: 12.5px; background: var(--bg-sunken); padding: 12px 16px; border-radius: 8px; white-space: pre-wrap;">Crée le schéma Drizzle décrit dans /docs/handoff.html section 3. Génère les migrations Supabase. Active RLS sur toutes les tables. Ajoute les policies décrites en 4.5 — un user ne voit que ses comptes + les comptes joints où il est dans account_members. Tests Vitest qui vérifient l'isolation.</p>
+  </div>
+
+  <div class="step">
+    <strong>Prompt 2 — Auth & onboarding</strong>
+    <p style="margin-top: 8px; font-family: var(--mono); font-size: 12.5px; background: var(--bg-sunken); padding: 12px 16px; border-radius: 8px; white-space: pre-wrap;">Implémente l'auth magic-link Supabase. Onboarding 3 étapes : email → infos profil → création space perso. Reprends exactement la palette + typo du prototype (styles.css à la racine). Mobile-first.</p>
+  </div>
+
+  <div class="step">
+    <strong>Prompt 3 — Shell + navigation</strong>
+    <p style="margin-top: 8px; font-family: var(--mono); font-size: 12.5px; background: var(--bg-sunken); padding: 12px 16px; border-radius: 8px; white-space: pre-wrap;">Porte shell.jsx en composants React Server + Client TypeScript. Sidebar collapsible desktop, bottom nav + drawer "Plus" mobile. Switcher Perso/Pro branché sur cookie + middleware. Tweaks panel avec persistance localStorage.</p>
+  </div>
+
+  <div class="step">
+    <strong>Prompt 4 — Comptes & comptes joints</strong>
+    <p style="margin-top: 8px; font-family: var(--mono); font-size: 12.5px; background: var(--bg-sunken); padding: 12px 16px; border-radius: 8px; white-space: pre-wrap;">Page /accounts depuis pages.jsx (fn AccountsPage). CRUD compte. Modale "Inviter co-titulaire" avec envoi email Resend + page d'acceptation /invitations/[token]. Affichage AvatarStack des membres. RLS testée.</p>
+  </div>
+
+  <div class="step">
+    <strong>Prompt 5 — Charges, splits, récap coloc</strong>
+    <p style="margin-top: 8px; font-family: var(--mono); font-size: 12.5px; background: var(--bg-sunken); padding: 12px 16px; border-radius: 8px; white-space: pre-wrap;">CRUD charges. Trigger Postgres qui crée les charge_splits à l'insert. Page /coloc avec algo de simplification (min cash flow). Realtime channel pour broadcast aux co-titulaires.</p>
+  </div>
+
+  <div class="step">
+    <strong>Prompt 6 — Dashboard + charts</strong>
+    <p style="margin-top: 8px; font-family: var(--mono); font-size: 12.5px; background: var(--bg-sunken); padding: 12px 16px; border-radius: 8px; white-space: pre-wrap;">Porte Dashboard + CalendarPage + YearlyPage. Charts en Recharts. Animations opt-in via Framer (toggle Tweaks). Projections solde 30j basées sur charges récurrentes.</p>
+  </div>
+
+  <div class="step">
+    <strong>Prompt 7 — GoCardless</strong>
+    <p style="margin-top: 8px; font-family: var(--mono); font-size: 12.5px; background: var(--bg-sunken); padding: 12px 16px; border-radius: 8px; white-space: pre-wrap;">Intégration GoCardless Bank Account Data. /api/bank/link flow OAuth. Cron quotidien /api/bank/sync. Catégorisation regex + override. UI de réconciliation charge attendue ↔ transaction réelle.</p>
+  </div>
+
+  <div class="step">
+    <strong>Prompt 8 — Module pro</strong>
+    <p style="margin-top: 8px; font-family: var(--mono); font-size: 12.5px; background: var(--bg-sunken); padding: 12px 16px; border-radius: 8px; white-space: pre-wrap;">Page /compta-pro depuis pages.jsx (fn ComptaProPage). Génération factures react-pdf. Calcul URSSAF auto avec virement vers compte provision. Export FEC. Compteur seuil TVA.</p>
+  </div>
+
+  <div class="step">
+    <strong>Prompt 9 — Courses temps réel + PWA</strong>
+    <p style="margin-top: 8px; font-family: var(--mono); font-size: 12.5px; background: var(--bg-sunken); padding: 12px 16px; border-radius: 8px; white-space: pre-wrap;">Liste courses Realtime. Notifications push web. PWA manifest + service worker. Test installation iOS/Android.</p>
+  </div>
+
+  <h2 id="roadmap">11. Roadmap par sprints</h2>
+  <ul>
+    <li><span class="n">M1</span><div><strong>Foundation (2 semaines)</strong><br/><span class="muted small">Setup, auth, schema, RLS, shell, comptes, comptes joints + invitations, charges manuelles + splits, récap coloc.</span></div><span class="meta">Prompts 1-5</span></li>
+    <li><span class="n">M2</span><div><strong>Vues + outils (2 semaines)</strong><br/><span class="muted small">Dashboard, calendrier, vue annuelle, simulateur, achats étalés, courses Realtime.</span></div><span class="meta">Prompts 6, 9</span></li>
+    <li><span class="n">M3</span><div><strong>Bancaire + pro (3 semaines)</strong><br/><span class="muted small">GoCardless, sync auto, catégorisation, réconciliation, module pro complet, export FEC.</span></div><span class="meta">Prompts 7-8</span></li>
+    <li><span class="n">M4</span><div><strong>Polish & launch</strong><br/><span class="muted small">Animations, états vides, onboarding guidé, PWA, beta privée avec 3 coloc test.</span></div><span class="meta">—</span></li>
+  </ul>
+
+  <div style="margin-top: 64px; padding: 24px; background: var(--accent-bg); border-radius: var(--radius-lg);">
+    <p class="eyebrow">Prochaine action</p>
+    <h3 style="font-family: var(--display); font-size: 28px; margin: 4px 0 8px; text-transform: none; letter-spacing: 0; color: var(--ink);">Créer le repo GitHub et lancer le Prompt 1.</h3>
+    <p style="margin: 0; color: var(--ink-2);">Tout le reste découle. Compte ~7-9 semaines pour une beta utilisable à 3 coloc.</p>
+  </div>
+</div>
+</body>
+</html>
