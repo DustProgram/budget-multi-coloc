@@ -3,6 +3,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { FileText, Plus, Trash2 } from 'lucide-react';
 import { api } from '../lib/api';
 import { eur, num } from '../lib/format';
+import { useSpaceAccountIdsSet } from '../lib/useSpaceAccounts';
 import {
   FREQUENCIES, SPLIT_MODES, type Account, type Charge,
   type Frequency, type SplitMode,
@@ -16,16 +17,24 @@ export function Charges() {
   const qc = useQueryClient();
   const [creating, setCreating] = useState(false);
 
-  const charges = useQuery({
+  const allCharges = useQuery({
     queryKey: ['charges'],
     queryFn: async () => (await api.get<Charge[]>('/charges/')).data,
   });
+  const spaceAccounts = useSpaceAccountIdsSet();
   const accounts = useQuery({
-    queryKey: ['accounts'],
+    queryKey: ['accounts', 'all'],
     queryFn: async () => (await api.get<Account[]>('/accounts/')).data,
   });
 
-  const myTotal = (charges.data ?? []).reduce((s, c) => s + num(c.my_share), 0);
+  // Filtre par space : charges sur un compte du space actif uniquement
+  const charges = {
+    ...allCharges,
+    data: (allCharges.data ?? []).filter(
+      (c) => c.account_id !== null && spaceAccounts.idsSet.has(c.account_id),
+    ),
+  };
+  const myTotal = charges.data.reduce((s, c) => s + num(c.my_share), 0);
 
   const remove = useMutation({
     mutationFn: async (id: number) => api.delete(`/charges/${id}`),

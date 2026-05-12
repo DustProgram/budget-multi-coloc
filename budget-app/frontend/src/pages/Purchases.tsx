@@ -3,6 +3,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { ShoppingBag, Plus, Trash2 } from 'lucide-react';
 import { api } from '../lib/api';
 import { eur, fmtDate, todayISO, num } from '../lib/format';
+import { useSpaceAccountIdsSet } from '../lib/useSpaceAccounts';
 import { PAYMENT_METHODS, type Account, type PaymentMethod, type Purchase } from '../types';
 import {
   Button, Card, EmptyState, ErrorBox, Field, Input, Loader, Modal,
@@ -13,14 +14,21 @@ export function Purchases() {
   const qc = useQueryClient();
   const [creating, setCreating] = useState(false);
 
-  const purchases = useQuery({
+  const allPurchases = useQuery({
     queryKey: ['purchases'],
     queryFn: async () => (await api.get<Purchase[]>('/purchases/')).data,
   });
+  const spaceAccounts = useSpaceAccountIdsSet();
   const accounts = useQuery({
-    queryKey: ['accounts'],
+    queryKey: ['accounts', 'all'],
     queryFn: async () => (await api.get<Account[]>('/accounts/')).data,
   });
+  const purchases = {
+    ...allPurchases,
+    data: (allPurchases.data ?? []).filter(
+      (p) => p.account_id !== null && spaceAccounts.idsSet.has(p.account_id),
+    ),
+  };
 
   const remove = useMutation({
     mutationFn: async (id: number) => api.delete(`/purchases/${id}`),

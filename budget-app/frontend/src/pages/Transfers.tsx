@@ -3,6 +3,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { ArrowLeftRight, Plus, Trash2 } from 'lucide-react';
 import { api } from '../lib/api';
 import { eur, fmtDate, todayISO } from '../lib/format';
+import { useSpaceAccountIdsSet } from '../lib/useSpaceAccounts';
 import {
   FREQUENCIES, type Account, type Frequency,
   type OneTimeTransfer, type RecurringTransfer,
@@ -17,18 +18,34 @@ export function Transfers() {
   const [tab, setTab] = useState<'recurring' | 'onetime'>('recurring');
   const [creating, setCreating] = useState(false);
 
-  const recurring = useQuery({
+  const allRecurring = useQuery({
     queryKey: ['transfers', 'recurring'],
     queryFn: async () => (await api.get<RecurringTransfer[]>('/transfers/recurring/')).data,
   });
-  const onetime = useQuery({
+  const allOnetime = useQuery({
     queryKey: ['transfers', 'onetime'],
     queryFn: async () => (await api.get<OneTimeTransfer[]>('/transfers/onetime/')).data,
   });
+  const spaceAccounts = useSpaceAccountIdsSet();
   const accounts = useQuery({
-    queryKey: ['accounts'],
+    queryKey: ['accounts', 'all'],
     queryFn: async () => (await api.get<Account[]>('/accounts/')).data,
   });
+  // Filtrage par space
+  const recurring = {
+    ...allRecurring,
+    data: (allRecurring.data ?? []).filter(
+      (r) => spaceAccounts.idsSet.has(r.source_account_id)
+          || spaceAccounts.idsSet.has(r.dest_account_id),
+    ),
+  };
+  const onetime = {
+    ...allOnetime,
+    data: (allOnetime.data ?? []).filter(
+      (o) => spaceAccounts.idsSet.has(o.source_account_id)
+          || spaceAccounts.idsSet.has(o.dest_account_id),
+    ),
+  };
 
   const accById = new Map((accounts.data ?? []).map((a) => [a.id, a]));
 

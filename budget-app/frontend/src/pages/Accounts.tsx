@@ -124,27 +124,54 @@ function AccountCard({ account, onManageMembers }: { account: Account; onManageM
 
 function NewAccountModal({ open, onClose, onSaved }: { open: boolean; onClose: () => void; onSaved: () => void }) {
   const { space } = useSpace();
+  const qc = useQueryClient();
   const [form, setForm] = useState({
     name: '', bank: '', type: ACCOUNT_TYPES[0] as string,
     initial_balance: '0', notes: '',
   });
+  const [memberIds, setMemberIds] = useState<number[]>([]);
   const [error, setError] = useState<string | null>(null);
+
+  const available = useQuery({
+    queryKey: ['available-users'],
+    queryFn: async () => (await api.get<UserPickerEntry[]>('/accounts/available-users')).data,
+    enabled: open,
+  });
+
+  // Reset selection si l'user repasse type ≠ Compte joint
+  const isJoint = form.type === 'Compte joint';
+  if (!isJoint && memberIds.length > 0) {
+    // ne pas appeler setState pendant le render — on le fait via useEffect
+  }
 
   const submit = useMutation({
     mutationFn: async () => {
-      await api.post('/accounts/', {
+      const { data } = await api.post<{ id: number }>('/accounts/', {
         ...form,
         initial_balance: form.initial_balance || '0',
         space,
       });
+      if (isJoint) {
+        for (const uid of memberIds) {
+          await api.post(`/accounts/${data.id}/members`, {
+            user_id: uid, role: 'cotitulaire',
+          });
+        }
+      }
     },
     onSuccess: () => {
       onSaved();
+      qc.invalidateQueries({ queryKey: ['accounts'] });
       setForm({ name: '', bank: '', type: ACCOUNT_TYPES[0], initial_balance: '0', notes: '' });
+      setMemberIds([]);
       onClose();
     },
     onError: (e) => setError(e instanceof Error ? e.message : 'Erreur'),
   });
+
+  function toggleMember(uid: number) {
+    setMemberIds((cur) => cur.includes(uid) ? cur.filter((x) => x !== uid) : [...cur, uid]);
+  }
 
   return (
     <Modal open={open} onClose={onClose} title="Nouveau compte">
@@ -154,7 +181,11 @@ function NewAccountModal({ open, onClose, onSaved }: { open: boolean; onClose: (
         <Field label="Banque"><Input required value={form.bank}
           onChange={(e) => setForm({ ...form, bank: e.target.value })} /></Field>
         <Field label="Type">
-          <Select value={form.type} onChange={(e) => setForm({ ...form, type: e.target.value })}>
+          <Select value={form.type} onChange={(e) => {
+            const t = e.target.value;
+            setForm({ ...form, type: t });
+            if (t !== 'Compte joint') setMemberIds([]);
+          }}>
             {ACCOUNT_TYPES.map((t) => <option key={t}>{t}</option>)}
           </Select>
         </Field>
@@ -162,6 +193,51 @@ function NewAccountModal({ open, onClose, onSaved }: { open: boolean; onClose: (
           <Input type="number" step="0.01" required value={form.initial_balance}
             onChange={(e) => setForm({ ...form, initial_balance: e.target.value })} />
         </Field>
+
+        {isJoint && (
+          <div style={{ marginTop: 6 }}>
+            <div className="eyebrow" style={{ marginBottom: 8 }}>
+              Co-titulaires (utilisateurs HA déjà inscrits)
+            </div>
+            {available.isLoading && <p className="muted small">Chargement…</p>}
+            {available.data && available.data.length === 0 && (
+              <p className="muted small">
+                Aucun autre utilisateur HA n'a encore ouvert l'app. Demande-leur
+                de se connecter une fois via HA pour apparaître ici.
+              </p>
+            )}
+            {available.data && available.data.length > 0 && (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginBottom: 10 }}>
+                {available.data.map((u) => {
+                  const checked = memberIds.includes(u.user_id);
+                  return (
+                    <label key={u.user_id} className="row gap-2" style={{
+                      padding: '8px 10px', borderRadius: 10,
+                      background: checked ? 'var(--bg-sunken)' : 'transparent',
+                      border: '1px solid ' + (checked ? 'var(--ink)' : 'var(--line)'),
+                      cursor: 'pointer',
+                    }}>
+                      <input type="checkbox" checked={checked}
+                        onChange={() => toggleMember(u.user_id)} />
+                      <Avatar user={u} size={26} />
+                      <div style={{ flex: 1 }}>
+                        <div style={{ fontWeight: 500, fontSize: 13 }}>
+                          {u.display_name || u.ha_username}
+                        </div>
+                        <div className="small muted">{u.ha_username}</div>
+                      </div>
+                    </label>
+                  );
+                })}
+              </div>
+            )}
+            <p className="small muted">
+              Les charges, transactions et la liste de courses créées sur ce compte
+              seront visibles par tous les co-titulaires.
+            </p>
+          </div>
+        )}
+
         {error && <ErrorBox message={error} />}
         <div className="row gap-2" style={{ justifyContent: 'flex-end', marginTop: 16 }}>
           <Button type="button" onClick={onClose}>Annuler</Button>

@@ -41,19 +41,19 @@ class ShoppingItemUpdate(BaseModel):
 class ShoppingItemOut(BaseModel):
     id: int
     label: str
-    quantity: Optional[str]
-    category: Optional[str]
+    quantity: Optional[str] = None
+    category: Optional[str] = None
     priority: str
-    estimated_price: Optional[Decimal]
-    actual_price: Optional[Decimal]
+    estimated_price: Optional[Decimal] = None
+    actual_price: Optional[Decimal] = None
     is_bought: bool
-    bought_at: Optional[datetime]
-    bought_by_user_id: Optional[int]
-    bought_by_name: Optional[str]
+    bought_at: Optional[datetime] = None
+    bought_by_user_id: Optional[int] = None
+    bought_by_name: Optional[str] = None
     added_by_user_id: int
-    added_by_name: Optional[str]
+    added_by_name: Optional[str] = None
     created_at: datetime
-    notes: Optional[str]
+    notes: Optional[str] = None
 
     class Config:
         from_attributes = True

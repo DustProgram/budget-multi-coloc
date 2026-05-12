@@ -3,6 +3,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { PiggyBank, Plus, Trash2 } from 'lucide-react';
 import { api } from '../lib/api';
 import { eur, num } from '../lib/format';
+import { useSpaceAccountIdsSet } from '../lib/useSpaceAccounts';
 import type { Account, Saving } from '../types';
 import {
   Button, Card, EmptyState, ErrorBox, Field, Input, Loader, Modal,
@@ -13,16 +14,25 @@ export function Savings() {
   const qc = useQueryClient();
   const [creating, setCreating] = useState(false);
 
-  const rules = useQuery({
+  const allRules = useQuery({
     queryKey: ['savings'],
     queryFn: async () => (await api.get<Saving[]>('/savings/')).data,
   });
+  const spaceAccounts = useSpaceAccountIdsSet();
   const accounts = useQuery({
-    queryKey: ['accounts'],
+    queryKey: ['accounts', 'all'],
     queryFn: async () => (await api.get<Account[]>('/accounts/')).data,
   });
+  // Filtre : règles dont source OU dest est dans le space actif
+  const rules = {
+    ...allRules,
+    data: (allRules.data ?? []).filter(
+      (r) => spaceAccounts.idsSet.has(r.source_account_id)
+          || spaceAccounts.idsSet.has(r.dest_account_id),
+    ),
+  };
 
-  const total = (rules.data ?? [])
+  const total = rules.data
     .filter((r) => r.is_active)
     .reduce((s, r) => s + num(r.amount), 0);
   const accById = new Map((accounts.data ?? []).map((a) => [a.id, a]));

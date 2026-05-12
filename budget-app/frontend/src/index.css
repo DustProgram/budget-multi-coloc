@@ -650,3 +650,43 @@ input, select, textarea { font-family: inherit; font-size: inherit; color: inher
   animation: none !important;
   transition: none !important;
 }
+
+/* === Space Pro : accent prune + sidebar légèrement teintée === */
+[data-space="pro"] {
+  --accent: oklch(0.55 0.09 320);
+  --accent-bg: oklch(0.94 0.03 320);
+}
+[data-space="pro"] .sidebar {
+  background: linear-gradient(180deg, var(--bg) 0%, color-mix(in oklch, var(--plum-bg) 35%, var(--bg)) 100%);
+}
+[data-space="pro"] .brand-mark {
+  background: var(--plum);
+  color: white;
+}
+[data-space="pro"] .brand-name small::after {
+  content: " · PRO";
+  color: var(--plum);
+  font-weight: 600;
+}
+
+/* Bande discrète "Mode professionnel" en haut du main quand en pro */
+[data-space="pro"] .main::before {
+  content: "Mode professionnel — vue isolée";
+  display: block;
+  margin: -28px -36px 22px;
+  padding: 8px 36px;
+  background: var(--plum-bg);
+  color: var(--plum);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  text-align: center;
+  border-bottom: 1px solid var(--line);
+}
+@media (max-width: 920px) {
+  [data-space="pro"] .main::before {
+    margin: -12px -14px 16px;
+    padding: 8px 14px;
+  }
+}

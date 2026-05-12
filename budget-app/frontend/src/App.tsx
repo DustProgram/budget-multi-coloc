@@ -17,6 +17,7 @@ import { Calendar } from './pages/Calendar';
 import { Settings } from './pages/Settings';
 import { ComptaPro } from './pages/ComptaPro';
 import { SpaceProvider } from './lib/space';
+import { AuthGate } from './lib/AuthGate';
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -35,7 +36,8 @@ export default function App() {
 
   return (
     <QueryClientProvider client={queryClient}>
-      <SpaceProvider>
+      <AuthGate>
+       <SpaceProvider>
         <BrowserRouter basename={basename}>
           <Routes>
             <Route element={<Layout />}>
@@ -58,7 +60,8 @@ export default function App() {
             </Route>
           </Routes>
         </BrowserRouter>
-      </SpaceProvider>
+       </SpaceProvider>
+      </AuthGate>
     </QueryClientProvider>
   );
 }

@@ -3,6 +3,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { TrendingUp, Plus, Trash2 } from 'lucide-react';
 import { api } from '../lib/api';
 import { eur, num } from '../lib/format';
+import { useSpaceAccountIdsSet } from '../lib/useSpaceAccounts';
 import { INCOME_TYPES, type Account, type Income, type IncomeTypeName } from '../types';
 import {
   Button, Card, EmptyState, ErrorBox, Field, Input, Loader, Modal,
@@ -13,16 +14,25 @@ export function Incomes() {
   const qc = useQueryClient();
   const [creating, setCreating] = useState(false);
 
-  const incomes = useQuery({
+  const allIncomes = useQuery({
     queryKey: ['incomes'],
     queryFn: async () => (await api.get<Income[]>('/incomes/')).data,
   });
+  const spaceAccounts = useSpaceAccountIdsSet();
+  // Tous les comptes (pas filtrés) pour la modal de création
   const accounts = useQuery({
-    queryKey: ['accounts'],
+    queryKey: ['accounts', 'all'],
     queryFn: async () => (await api.get<Account[]>('/accounts/')).data,
   });
 
-  const total = (incomes.data ?? []).reduce((s, i) => s + num(i.amount), 0);
+  // Filtre par space : on ne montre que les revenus liés à un compte du space actif
+  const incomes = {
+    ...allIncomes,
+    data: (allIncomes.data ?? []).filter(
+      (i) => i.account_id !== null && spaceAccounts.idsSet.has(i.account_id),
+    ),
+  };
+  const total = incomes.data.reduce((s, i) => s + num(i.amount), 0);
   const accById = new Map((accounts.data ?? []).map((a) => [a.id, a]));
 
   const remove = useMutation({

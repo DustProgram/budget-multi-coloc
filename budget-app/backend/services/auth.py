@@ -26,8 +26,14 @@ from models import User
 
 logger = logging.getLogger(__name__)
 
-# Servent toujours, sans aucune auth (statut/santé/docs).
-PUBLIC_PATHS = {"/api/health", "/api/docs", "/api/openapi.json"}
+# Servent toujours, sans aucune auth (statut/santé/docs/login).
+PUBLIC_PATHS_PREFIX = (
+    "/api/health",
+    "/api/docs",
+    "/api/openapi.json",
+    "/api/auth/login",          # login externe : liste users + verify token
+)
+PUBLIC_PATHS = set(PUBLIC_PATHS_PREFIX)
 
 
 class HAUserMiddleware(BaseHTTPMiddleware):
@@ -36,9 +42,12 @@ class HAUserMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next):
         path = request.url.path
 
-        # Routes publiques : aucune auth
+        # Routes publiques : aucune auth (match exact OU préfixe)
+        is_public_api = path in PUBLIC_PATHS or any(
+            path.startswith(p + "/") for p in PUBLIC_PATHS_PREFIX
+        )
         if (
-            path in PUBLIC_PATHS
+            is_public_api
             or path.startswith("/assets/")
             or path == "/"
             or not path.startswith("/api/")
