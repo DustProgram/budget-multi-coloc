@@ -152,7 +152,7 @@ async def list_upcoming_events(
 
         # Charges (mensuelles + non-mensuelles via helper)
         for ch in charges:
-            if not charge_is_active_in_month(ch, m):
+            if not charge_is_active_in_month(ch, m, y):
                 continue
             if ch.account_id is None:
                 continue

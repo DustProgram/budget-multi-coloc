@@ -491,6 +491,24 @@ input, select, textarea { font-family: inherit; font-size: inherit; color: inher
   .kpi-value { font-size: 26px; }
   .kpi.large .kpi-value { font-size: 36px; }
   .sim-stamp { font-size: 56px; }
+  /* Tous les grids 2-col / 3-col passent en une colonne unique sur mobile,
+     pour éviter que les cards/panneaux se chevauchent ou débordent. */
+  .main .grid { grid-template-columns: 1fr !important; }
+  /* Sauf cas spéciaux où on veut quand même 2 colonnes (KPIs serrés) */
+  .grid.kpi-row { grid-template-columns: repeat(2, 1fr) !important; }
+  /* Tables qui débordent : scroll horizontal au lieu de wrap */
+  .card .t,
+  .card > table.t {
+    display: block;
+    overflow-x: auto;
+    white-space: nowrap;
+  }
+  /* Heat map yearly : reste en 12 cellules mais plus petites */
+  .heat { grid-template-columns: repeat(6, 1fr); }
+  .heat-cell .v { font-size: 12px; }
+  /* Page header : empile les boutons sous le titre, pas à droite étiré */
+  .page-header { flex-direction: column; align-items: stretch; }
+  .page-header .row { flex-wrap: wrap; }
 }
 
 /* === Espace switcher === */

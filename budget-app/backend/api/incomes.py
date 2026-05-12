@@ -4,6 +4,7 @@ Filtrage : un user voit ses propres revenus + ceux liés à un compte joint
 dont il est co-titulaire. Co-titulaires peuvent modifier/supprimer toute
 ligne du compte (pas seulement leurs propres saisies).
 """
+from datetime import date as DateType
 from decimal import Decimal
 from typing import Optional
 
@@ -27,6 +28,8 @@ class IncomeCreate(BaseModel):
     account_id: Optional[int] = None
     notes: Optional[str] = None
     is_active: bool = True
+    valid_from: Optional[DateType] = None
+    valid_to: Optional[DateType] = None
 
 
 class IncomeUpdate(BaseModel):
@@ -37,6 +40,8 @@ class IncomeUpdate(BaseModel):
     account_id: Optional[int] = None
     notes: Optional[str] = None
     is_active: Optional[bool] = None
+    valid_from: Optional[DateType] = None
+    valid_to: Optional[DateType] = None
 
 
 class IncomeOut(BaseModel):
@@ -49,6 +54,8 @@ class IncomeOut(BaseModel):
     notes: Optional[str]
     is_active: bool
     user_id: int
+    valid_from: Optional[DateType] = None
+    valid_to: Optional[DateType] = None
 
     class Config:
         from_attributes = True

@@ -3,6 +3,7 @@
 Visibilité élargie : co-titulaire d'au moins un des comptes (source ou dest)
 → accès en lecture/écriture/suppression.
 """
+from datetime import date as DateType
 from decimal import Decimal
 from typing import Optional
 
@@ -26,6 +27,8 @@ class SavingCreate(BaseModel):
     day_of_month: int
     is_active: bool = True
     notes: Optional[str] = None
+    valid_from: Optional[DateType] = None
+    valid_to: Optional[DateType] = None
 
 
 class SavingUpdate(BaseModel):
@@ -36,6 +39,8 @@ class SavingUpdate(BaseModel):
     day_of_month: Optional[int] = None
     is_active: Optional[bool] = None
     notes: Optional[str] = None
+    valid_from: Optional[DateType] = None
+    valid_to: Optional[DateType] = None
 
 
 class SavingOut(BaseModel):
@@ -48,6 +53,8 @@ class SavingOut(BaseModel):
     is_active: bool
     notes: Optional[str]
     user_id: int
+    valid_from: Optional[DateType] = None
+    valid_to: Optional[DateType] = None
 
     class Config:
         from_attributes = True

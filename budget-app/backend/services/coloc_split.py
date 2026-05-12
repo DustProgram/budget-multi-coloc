@@ -67,7 +67,7 @@ def compute_coloc_breakdown(db: Session, year: int, month: int) -> dict:
         Charge.split_mode != SplitMode.PERSO,
         Charge.account_id.in_(joint_account_ids),
     ).all()
-    shared_charges = [c for c in shared_charges if charge_is_active_in_month(c, month)]
+    shared_charges = [c for c in shared_charges if charge_is_active_in_month(c, month, year)]
 
     # 3. Lignes détaillées
     charges_lines: list[ColocChargeLine] = []

@@ -306,26 +306,30 @@ export function Calendar() {
       )}
 
       {query.data && query.data.accounts.length > 0 && (
-        <div className="grid" style={{
-          gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))',
-          marginTop: 24,
-        }}>
-          {query.data.accounts.map((a) => {
-            const start = num(a.starting_balance);
-            const end = num(a.projected_end_balance);
-            const delta = end - start;
-            return (
-              <Card key={a.account_id}>
-                <p className="eyebrow" style={{ margin: 0 }}>{a.name}</p>
-                <div className="num display" style={{ fontSize: 28 }}>{eur(end)}</div>
-                <div className={`small ${delta >= 0 ? 'pos' : 'neg'}`}>
-                  {delta >= 0 ? '+' : ''}{eur(delta)} sur la période
-                </div>
-                <div className="small muted">Départ : {eur(start)}</div>
-              </Card>
-            );
-          })}
-        </div>
+        <>
+          <p className="eyebrow" style={{ marginTop: 24, marginBottom: 8 }}>
+            Projection à 180 jours (basée sur tes récurrences)
+          </p>
+          <div className="grid" style={{
+            gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))',
+          }}>
+            {query.data.accounts.map((a) => {
+              const start = num(a.starting_balance);
+              const end = num(a.projected_end_balance);
+              const delta = end - start;
+              return (
+                <Card key={a.account_id}>
+                  <p className="eyebrow" style={{ margin: 0 }}>{a.name}</p>
+                  <div className="num display" style={{ fontSize: 28 }}>{eur(end)}</div>
+                  <div className={`small ${delta >= 0 ? 'pos' : 'neg'}`}>
+                    {delta >= 0 ? '+' : ''}{eur(delta)} dans 6 mois
+                  </div>
+                  <div className="small muted">Aujourd'hui : {eur(start)}</div>
+                </Card>
+              );
+            })}
+          </div>
+        </>
       )}
 
       <NewCustomEventModal

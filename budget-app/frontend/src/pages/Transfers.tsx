@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { ArrowLeftRight, Plus, Trash2 } from 'lucide-react';
+import { ArrowLeftRight, Plus, Trash2, Pencil } from 'lucide-react';
 import { api } from '../lib/api';
 import { eur, fmtDate, todayISO } from '../lib/format';
 import { useSpaceAccountIdsSet } from '../lib/useSpaceAccounts';
@@ -14,10 +14,16 @@ import {
   PageHeader, Pill, Select,
 } from '../components/ui';
 
+type EditingTarget =
+  | { kind: 'recurring'; data: RecurringTransfer }
+  | { kind: 'onetime'; data: OneTimeTransfer }
+  | null;
+
 export function Transfers() {
   const qc = useQueryClient();
   const [tab, setTab] = useState<'recurring' | 'onetime'>('recurring');
   const [creating, setCreating] = useState(false);
+  const [editing, setEditing] = useState<EditingTarget>(null);
 
   const allRecurring = useQuery({
     queryKey: ['transfers', 'recurring'],
@@ -33,7 +39,6 @@ export function Transfers() {
     queryKey: ['accounts', 'all'],
     queryFn: async () => (await api.get<Account[]>('/accounts/')).data,
   });
-  // Filtrage par space
   const recurring = {
     ...allRecurring,
     data: (allRecurring.data ?? []).filter(
@@ -103,9 +108,14 @@ export function Transfers() {
                     <td className="muted small">{users.display(r.user_id)}</td>
                     <td className="r num">{eur(r.amount)}</td>
                     <td className="r">
-                      <Button variant="sm" onClick={() => { if (confirm(`Supprimer "${r.label}" ?`)) remove.mutate({ kind: 'recurring', id: r.id }); }}>
-                        <Trash2 size={12} />
-                      </Button>
+                      <div className="row gap-2" style={{ justifyContent: 'flex-end' }}>
+                        <Button variant="sm" onClick={() => setEditing({ kind: 'recurring', data: r })} title="Modifier">
+                          <Pencil size={12} />
+                        </Button>
+                        <Button variant="sm" onClick={() => { if (confirm(`Supprimer "${r.label}" ?`)) remove.mutate({ kind: 'recurring', id: r.id }); }} title="Supprimer">
+                          <Trash2 size={12} />
+                        </Button>
+                      </div>
                     </td>
                   </tr>
                 ))}
@@ -137,9 +147,14 @@ export function Transfers() {
                     <td className="muted small">{users.display(o.user_id)}</td>
                     <td className="r num">{eur(o.amount)}</td>
                     <td className="r">
-                      <Button variant="sm" onClick={() => { if (confirm(`Supprimer "${o.label}" ?`)) remove.mutate({ kind: 'onetime', id: o.id }); }}>
-                        <Trash2 size={12} />
-                      </Button>
+                      <div className="row gap-2" style={{ justifyContent: 'flex-end' }}>
+                        <Button variant="sm" onClick={() => setEditing({ kind: 'onetime', data: o })} title="Modifier">
+                          <Pencil size={12} />
+                        </Button>
+                        <Button variant="sm" onClick={() => { if (confirm(`Supprimer "${o.label}" ?`)) remove.mutate({ kind: 'onetime', id: o.id }); }} title="Supprimer">
+                          <Trash2 size={12} />
+                        </Button>
+                      </div>
                     </td>
                   </tr>
                 ))}
@@ -149,49 +164,117 @@ export function Transfers() {
         )
       )}
 
-      <NewTransferModal
-        open={creating} onClose={() => setCreating(false)}
+      <TransferModal
+        open={creating || !!editing}
+        existing={editing}
+        kind={editing?.kind ?? tab}
+        onClose={() => { setCreating(false); setEditing(null); }}
         accounts={accounts.data ?? []}
-        kind={tab}
         onSaved={() => qc.invalidateQueries({ queryKey: ['transfers'] })}
       />
     </>
   );
 }
 
-function NewTransferModal({
-  open, onClose, accounts, kind, onSaved,
+function TransferModal({
+  open, onClose, accounts, kind, existing, onSaved,
 }: {
   open: boolean; onClose: () => void;
   accounts: Account[]; kind: 'recurring' | 'onetime';
-  onSaved: () => void;
+  existing: EditingTarget; onSaved: () => void;
 }) {
-  const [form, setForm] = useState({
-    label: '', amount: '0',
-    source_account_id: accounts[0]?.id ?? 0,
-    dest_account_id: accounts[1]?.id ?? accounts[0]?.id ?? 0,
-    day_of_month: 1,
-    frequency: 'Mensuelle' as Frequency,
-    date: todayISO(),
+  const isEdit = !!existing;
+  const [form, setForm] = useState<{
+    label: string;
+    amount: string;
+    source_account_id: number;
+    dest_account_id: number;
+    day_of_month: number;
+    frequency: Frequency;
+    date: string;
+    valid_from: string;
+    valid_to: string;
+  }>(() => {
+    if (existing?.kind === 'recurring') {
+      const r = existing.data;
+      return {
+        label: r.label, amount: r.amount,
+        source_account_id: r.source_account_id, dest_account_id: r.dest_account_id,
+        day_of_month: r.day_of_month, frequency: r.frequency,
+        date: todayISO(),
+        valid_from: r.valid_from ?? '',
+        valid_to: r.valid_to ?? '',
+      };
+    }
+    if (existing?.kind === 'onetime') {
+      const o = existing.data;
+      return {
+        label: o.label, amount: o.amount,
+        source_account_id: o.source_account_id, dest_account_id: o.dest_account_id,
+        day_of_month: 1, frequency: 'Mensuelle' as Frequency,
+        date: o.date,
+        valid_from: '', valid_to: '',
+      };
+    }
+    return {
+      label: '', amount: '0',
+      source_account_id: accounts[0]?.id ?? 0,
+      dest_account_id: accounts[1]?.id ?? accounts[0]?.id ?? 0,
+      day_of_month: 1,
+      frequency: 'Mensuelle' as Frequency,
+      date: todayISO(),
+      valid_from: '', valid_to: '',
+    };
   });
   const [error, setError] = useState<string | null>(null);
+
+  const effectiveKind = existing?.kind ?? kind;
 
   const submit = useMutation({
     mutationFn: async () => {
       if (form.source_account_id === form.dest_account_id) throw new Error('Source et destination doivent être différents.');
-      const path = kind === 'recurring' ? '/transfers/recurring/' : '/transfers/onetime/';
-      const body = kind === 'recurring'
-        ? { ...form, amount: form.amount || '0', is_active: true }
-        : { label: form.label, amount: form.amount || '0', date: form.date,
-            source_account_id: form.source_account_id, dest_account_id: form.dest_account_id };
-      await api.post(path, body);
+      if (effectiveKind === 'recurring') {
+        const body = {
+          label: form.label,
+          amount: form.amount || '0',
+          source_account_id: form.source_account_id,
+          dest_account_id: form.dest_account_id,
+          day_of_month: form.day_of_month,
+          frequency: form.frequency,
+          is_active: true,
+          valid_from: form.valid_from || null,
+          valid_to: form.valid_to || null,
+        };
+        if (isEdit && existing?.kind === 'recurring') {
+          await api.patch(`/transfers/recurring/${existing.data.id}`, body);
+        } else {
+          await api.post('/transfers/recurring/', body);
+        }
+      } else {
+        const body = {
+          label: form.label,
+          amount: form.amount || '0',
+          date: form.date,
+          source_account_id: form.source_account_id,
+          dest_account_id: form.dest_account_id,
+        };
+        if (isEdit && existing?.kind === 'onetime') {
+          await api.patch(`/transfers/onetime/${existing.data.id}`, body);
+        } else {
+          await api.post('/transfers/onetime/', body);
+        }
+      }
     },
     onSuccess: () => { onSaved(); onClose(); },
     onError: (e) => setError(e instanceof Error ? e.message : 'Erreur'),
   });
 
+  const title = isEdit
+    ? (effectiveKind === 'recurring' ? 'Modifier le virement récurrent' : 'Modifier le virement ponctuel')
+    : (effectiveKind === 'recurring' ? 'Nouveau virement récurrent' : 'Nouveau virement ponctuel');
+
   return (
-    <Modal open={open} onClose={onClose} title={kind === 'recurring' ? 'Nouveau virement récurrent' : 'Nouveau virement ponctuel'}>
+    <Modal open={open} onClose={onClose} title={title}>
       <form onSubmit={(e) => { e.preventDefault(); setError(null); submit.mutate(); }}>
         <Field label="Libellé"><Input required value={form.label}
           onChange={(e) => setForm({ ...form, label: e.target.value })} /></Field>
@@ -211,7 +294,7 @@ function NewTransferModal({
             {accounts.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}
           </Select>
         </Field>
-        {kind === 'recurring' ? (
+        {effectiveKind === 'recurring' ? (
           <>
             <Field label="Jour du mois">
               <Input type="number" min="1" max="31" required value={form.day_of_month}
@@ -222,6 +305,16 @@ function NewTransferModal({
                 {FREQUENCIES.map((f) => <option key={f}>{f}</option>)}
               </Select>
             </Field>
+            <div className="grid" style={{ gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+              <Field label="À partir de (optionnel)">
+                <Input type="date" value={form.valid_from}
+                  onChange={(e) => setForm({ ...form, valid_from: e.target.value })} />
+              </Field>
+              <Field label="Jusqu'au (optionnel)">
+                <Input type="date" value={form.valid_to}
+                  onChange={(e) => setForm({ ...form, valid_to: e.target.value })} />
+              </Field>
+            </div>
           </>
         ) : (
           <Field label="Date">
@@ -233,7 +326,7 @@ function NewTransferModal({
         <div className="row gap-2" style={{ justifyContent: 'flex-end', marginTop: 16 }}>
           <Button type="button" onClick={onClose}>Annuler</Button>
           <Button type="submit" variant="primary" disabled={submit.isPending}>
-            {submit.isPending ? 'Création…' : 'Créer'}
+            {submit.isPending ? 'Enregistrement…' : (isEdit ? 'Enregistrer' : 'Créer')}
           </Button>
         </div>
       </form>

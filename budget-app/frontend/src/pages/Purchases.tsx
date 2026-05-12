@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { ShoppingBag, Plus, Trash2 } from 'lucide-react';
+import { ShoppingBag, Plus, Trash2, Pencil } from 'lucide-react';
 import { api } from '../lib/api';
 import { eur, fmtDate, todayISO, num } from '../lib/format';
 import { useSpaceAccountIdsSet } from '../lib/useSpaceAccounts';
@@ -14,6 +14,7 @@ import {
 export function Purchases() {
   const qc = useQueryClient();
   const [creating, setCreating] = useState(false);
+  const [editing, setEditing] = useState<Purchase | null>(null);
 
   const allPurchases = useQuery({
     queryKey: ['purchases'],
@@ -79,9 +80,14 @@ export function Purchases() {
                   <td className="r num">{eur(p.total_amount)}</td>
                   <td className="r num neg display" style={{ fontSize: 17 }}>−{eur(p.monthly_amount)}</td>
                   <td className="r">
-                    <Button variant="sm" onClick={() => { if (confirm(`Supprimer "${p.description}" ?`)) remove.mutate(p.id); }}>
-                      <Trash2 size={12} />
-                    </Button>
+                    <div className="row gap-2" style={{ justifyContent: 'flex-end' }}>
+                      <Button variant="sm" onClick={() => setEditing(p)} title="Modifier">
+                        <Pencil size={12} />
+                      </Button>
+                      <Button variant="sm" onClick={() => { if (confirm(`Supprimer "${p.description}" ?`)) remove.mutate(p.id); }} title="Supprimer">
+                        <Trash2 size={12} />
+                      </Button>
+                    </div>
                   </td>
                 </tr>
               ))}
@@ -90,8 +96,10 @@ export function Purchases() {
         </Card>
       )}
 
-      <NewPurchaseModal
-        open={creating} onClose={() => setCreating(false)}
+      <PurchaseModal
+        open={creating || !!editing}
+        existing={editing}
+        onClose={() => { setCreating(false); setEditing(null); }}
         accounts={accounts.data ?? []}
         onSaved={() => qc.invalidateQueries({ queryKey: ['purchases'] })}
       />
@@ -99,9 +107,13 @@ export function Purchases() {
   );
 }
 
-function NewPurchaseModal({
-  open, onClose, accounts, onSaved,
-}: { open: boolean; onClose: () => void; accounts: Account[]; onSaved: () => void }) {
+function PurchaseModal({
+  open, onClose, accounts, existing, onSaved,
+}: {
+  open: boolean; onClose: () => void; accounts: Account[];
+  existing: Purchase | null; onSaved: () => void;
+}) {
+  const isEdit = !!existing;
   const [form, setForm] = useState<{
     description: string;
     total_amount: string;
@@ -110,7 +122,15 @@ function NewPurchaseModal({
     category: string;
     payment_method: PaymentMethod;
     account_id: number | null;
-  }>({
+  }>(() => existing ? {
+    description: existing.description,
+    total_amount: existing.total_amount,
+    nb_installments: existing.nb_installments,
+    date: existing.date,
+    category: existing.category ?? '',
+    payment_method: existing.payment_method,
+    account_id: existing.account_id,
+  } : {
     description: '', total_amount: '0', nb_installments: 1,
     date: todayISO(), category: '',
     payment_method: 'CB',
@@ -120,7 +140,12 @@ function NewPurchaseModal({
 
   const submit = useMutation({
     mutationFn: async () => {
-      await api.post('/purchases/', { ...form, total_amount: form.total_amount || '0' });
+      const body = { ...form, total_amount: form.total_amount || '0' };
+      if (isEdit && existing) {
+        await api.patch(`/purchases/${existing.id}`, body);
+      } else {
+        await api.post('/purchases/', body);
+      }
     },
     onSuccess: () => { onSaved(); onClose(); },
     onError: (e) => setError(e instanceof Error ? e.message : 'Erreur'),
@@ -129,7 +154,7 @@ function NewPurchaseModal({
   const monthly = num(form.total_amount) / Math.max(1, form.nb_installments);
 
   return (
-    <Modal open={open} onClose={onClose} title="Nouvel achat">
+    <Modal open={open} onClose={onClose} title={isEdit ? "Modifier l'achat" : 'Nouvel achat'}>
       <form onSubmit={(e) => { e.preventDefault(); setError(null); submit.mutate(); }}>
         <Field label="Description"><Input required value={form.description}
           onChange={(e) => setForm({ ...form, description: e.target.value })} /></Field>
@@ -177,7 +202,7 @@ function NewPurchaseModal({
         <div className="row gap-2" style={{ justifyContent: 'flex-end', marginTop: 16 }}>
           <Button type="button" onClick={onClose}>Annuler</Button>
           <Button type="submit" variant="primary" disabled={submit.isPending}>
-            {submit.isPending ? 'Création…' : 'Créer'}
+            {submit.isPending ? 'Enregistrement…' : (isEdit ? 'Enregistrer' : 'Créer')}
           </Button>
         </div>
       </form>

@@ -79,6 +79,11 @@ def init_db():
     # SQLite ne supporte pas ALTER COLUMN — il faut recréer la table.
     _migrate_messages_account_id_nullable()
 
+    # Période de validité (valid_from / valid_to) sur les ressources récurrentes
+    for tbl in ("incomes", "charges", "recurring_transfers", "auto_savings"):
+        _migrate_add_column_if_missing(tbl, "valid_from", "DATE")
+        _migrate_add_column_if_missing(tbl, "valid_to", "DATE")
+
     # ── Indexes additionnels α1 (latence) ──────────────────────────────
     # Composite : récupérer les messages d'un foyer triés par date sans full scan
     _create_index_if_missing(

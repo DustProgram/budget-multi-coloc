@@ -5,6 +5,7 @@ par les comptes joints où il est member.
 Calcul de la part personnelle : déléguée à services.charge_splits.my_share_for_user
 (splits persistés sur comptes joints, fallback compute_my_share sinon).
 """
+from datetime import date as DateType
 from decimal import Decimal
 from typing import Optional
 
@@ -42,6 +43,8 @@ class ChargeCreate(BaseModel):
     is_shared: bool = False
     notes: Optional[str] = None
     is_active: bool = True
+    valid_from: Optional[DateType] = None
+    valid_to: Optional[DateType] = None
 
 
 class ChargeUpdate(BaseModel):
@@ -57,6 +60,8 @@ class ChargeUpdate(BaseModel):
     is_shared: Optional[bool] = None
     notes: Optional[str] = None
     is_active: Optional[bool] = None
+    valid_from: Optional[DateType] = None
+    valid_to: Optional[DateType] = None
 
 
 class ChargeOut(BaseModel):
@@ -76,6 +81,8 @@ class ChargeOut(BaseModel):
     my_share: Decimal
     payer_user_id: int
     splits: list[SplitOut] = []
+    valid_from: Optional[DateType] = None
+    valid_to: Optional[DateType] = None
 
     class Config:
         from_attributes = True
@@ -99,6 +106,8 @@ def _to_out(db: Session, charge: Charge, user_id: int) -> ChargeOut:
         is_active=charge.is_active,
         my_share=my_share_for_user(db, charge, user_id),
         payer_user_id=charge.user_id,
+        valid_from=charge.valid_from,
+        valid_to=charge.valid_to,
         splits=[
             SplitOut(
                 id=s.id, user_id=s.user_id,

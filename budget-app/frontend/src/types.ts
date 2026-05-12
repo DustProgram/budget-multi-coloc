@@ -88,6 +88,8 @@ export interface Income {
   notes: string | null;
   is_active: boolean;
   user_id: number;
+  valid_from: string | null;
+  valid_to: string | null;
 }
 
 export const FREQUENCIES = [
@@ -126,6 +128,8 @@ export interface Charge {
   my_share: string;
   payer_user_id: number;
   splits: ChargeSplit[];
+  valid_from: string | null;
+  valid_to: string | null;
 }
 
 export interface RecurringTransfer {
@@ -139,6 +143,8 @@ export interface RecurringTransfer {
   is_active: boolean;
   notes: string | null;
   user_id: number;
+  valid_from: string | null;
+  valid_to: string | null;
 }
 
 export interface OneTimeTransfer {
@@ -162,6 +168,8 @@ export interface Saving {
   is_active: boolean;
   notes: string | null;
   user_id: number;
+  valid_from: string | null;
+  valid_to: string | null;
 }
 
 export const PAYMENT_METHODS = [

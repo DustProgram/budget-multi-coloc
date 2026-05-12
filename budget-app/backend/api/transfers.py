@@ -43,6 +43,8 @@ class RecurringCreate(BaseModel):
     frequency: Frequency = Frequency.MENSUELLE
     is_active: bool = True
     notes: Optional[str] = None
+    valid_from: Optional[date] = None
+    valid_to: Optional[date] = None
 
 
 class RecurringUpdate(BaseModel):
@@ -54,6 +56,8 @@ class RecurringUpdate(BaseModel):
     frequency: Optional[Frequency] = None
     is_active: Optional[bool] = None
     notes: Optional[str] = None
+    valid_from: Optional[date] = None
+    valid_to: Optional[date] = None
 
 
 class RecurringOut(BaseModel):
@@ -67,6 +71,8 @@ class RecurringOut(BaseModel):
     is_active: bool
     notes: Optional[str]
     user_id: int
+    valid_from: Optional[date] = None
+    valid_to: Optional[date] = None
 
     class Config:
         from_attributes = True

@@ -186,6 +186,10 @@ class Income(Base):
     account_id = Column(Integer, ForeignKey("accounts.id"), nullable=True)
     notes = Column(Text, nullable=True)
     is_active = Column(Boolean, default=True)
+    # Période de validité (optionnelle) — pour gérer changements de salaire
+    # ou revenus temporaires sans perdre l'historique.
+    valid_from = Column(Date, nullable=True)
+    valid_to = Column(Date, nullable=True)
 
     user = relationship("User", backref="incomes")
     account = relationship("Account")
@@ -212,6 +216,10 @@ class Charge(Base):
     is_shared = Column(Boolean, default=False)  # Visible aux colocs
     notes = Column(Text, nullable=True)
     is_active = Column(Boolean, default=True)
+    # Période de validité (optionnelle) — pour gérer charges qui démarrent
+    # ou expirent (ex : abonnement Netflix de mars à juillet seulement).
+    valid_from = Column(Date, nullable=True)
+    valid_to = Column(Date, nullable=True)
 
     user = relationship("User", backref="charges")
     account = relationship("Account")
@@ -254,6 +262,8 @@ class RecurringTransfer(Base):
     frequency = Column(SQLEnum(Frequency), default=Frequency.MENSUELLE)
     is_active = Column(Boolean, default=True)
     notes = Column(Text, nullable=True)
+    valid_from = Column(Date, nullable=True)
+    valid_to = Column(Date, nullable=True)
 
 
 class OneTimeTransfer(Base):
@@ -285,6 +295,8 @@ class AutoSaving(Base):
     day_of_month = Column(Integer, nullable=False)
     is_active = Column(Boolean, default=True)
     notes = Column(Text, nullable=True)
+    valid_from = Column(Date, nullable=True)
+    valid_to = Column(Date, nullable=True)
 
 
 # ============================================================

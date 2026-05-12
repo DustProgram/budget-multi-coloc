@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { TrendingUp, Plus, Trash2 } from 'lucide-react';
+import { TrendingUp, Plus, Trash2, Pencil } from 'lucide-react';
 import { api } from '../lib/api';
 import { eur, num } from '../lib/format';
 import { useSpaceAccountIdsSet } from '../lib/useSpaceAccounts';
@@ -14,6 +14,7 @@ import {
 export function Incomes() {
   const qc = useQueryClient();
   const [creating, setCreating] = useState(false);
+  const [editing, setEditing] = useState<Income | null>(null);
 
   const allIncomes = useQuery({
     queryKey: ['incomes'],
@@ -88,9 +89,14 @@ export function Incomes() {
                   <td className="muted small">{users.display(i.user_id)}</td>
                   <td className="r num pos display" style={{ fontSize: 18 }}>+{eur(i.amount)}</td>
                   <td className="r">
-                    <Button variant="sm" onClick={() => { if (confirm(`Supprimer "${i.source}" ?`)) remove.mutate(i.id); }}>
-                      <Trash2 size={12} />
-                    </Button>
+                    <div className="row gap-2" style={{ justifyContent: 'flex-end' }}>
+                      <Button variant="sm" onClick={() => setEditing(i)} title="Modifier">
+                        <Pencil size={12} />
+                      </Button>
+                      <Button variant="sm" onClick={() => { if (confirm(`Supprimer "${i.source}" ?`)) remove.mutate(i.id); }} title="Supprimer">
+                        <Trash2 size={12} />
+                      </Button>
+                    </div>
                   </td>
                 </tr>
               ))}
@@ -99,8 +105,10 @@ export function Incomes() {
         </Card>
       )}
 
-      <NewIncomeModal
-        open={creating} onClose={() => setCreating(false)}
+      <IncomeModal
+        open={creating || !!editing}
+        existing={editing}
+        onClose={() => { setCreating(false); setEditing(null); }}
         accounts={accounts.data ?? []}
         onSaved={() => qc.invalidateQueries({ queryKey: ['incomes'] })}
       />
@@ -108,40 +116,58 @@ export function Incomes() {
   );
 }
 
-function NewIncomeModal({
-  open, onClose, accounts, onSaved,
-}: { open: boolean; onClose: () => void; accounts: Account[]; onSaved: () => void }) {
+function IncomeModal({
+  open, onClose, accounts, existing, onSaved,
+}: {
+  open: boolean; onClose: () => void; accounts: Account[];
+  existing: Income | null; onSaved: () => void;
+}) {
+  const isEdit = !!existing;
   const [form, setForm] = useState<{
     source: string;
     amount: string;
     day_of_month: number;
     type: IncomeTypeName;
     account_id: number | null;
-  }>({
+    valid_from: string;
+    valid_to: string;
+  }>(() => existing ? {
+    source: existing.source,
+    amount: existing.amount,
+    day_of_month: existing.day_of_month,
+    type: existing.type,
+    account_id: existing.account_id,
+    valid_from: existing.valid_from ?? '',
+    valid_to: existing.valid_to ?? '',
+  } : {
     source: '', amount: '0', day_of_month: 1,
-    type: 'Régulier',
+    type: 'Régulier' as IncomeTypeName,
     account_id: accounts[0]?.id ?? null,
+    valid_from: '',
+    valid_to: '',
   });
   const [error, setError] = useState<string | null>(null);
 
   const submit = useMutation({
     mutationFn: async () => {
-      await api.post('/incomes/', {
+      const body = {
         ...form,
         amount: form.amount || '0',
-        account_id: form.account_id,
-      });
+        valid_from: form.valid_from || null,
+        valid_to: form.valid_to || null,
+      };
+      if (isEdit && existing) {
+        await api.patch(`/incomes/${existing.id}`, body);
+      } else {
+        await api.post('/incomes/', body);
+      }
     },
-    onSuccess: () => {
-      onSaved();
-      setForm({ source: '', amount: '0', day_of_month: 1, type: 'Régulier', account_id: accounts[0]?.id ?? null });
-      onClose();
-    },
+    onSuccess: () => { onSaved(); onClose(); },
     onError: (e) => setError(e instanceof Error ? e.message : 'Erreur'),
   });
 
   return (
-    <Modal open={open} onClose={onClose} title="Nouveau revenu">
+    <Modal open={open} onClose={onClose} title={isEdit ? 'Modifier le revenu' : 'Nouveau revenu'}>
       <form onSubmit={(e) => { e.preventDefault(); setError(null); submit.mutate(); }}>
         <Field label="Source"><Input required value={form.source}
           onChange={(e) => setForm({ ...form, source: e.target.value })} /></Field>
@@ -165,11 +191,24 @@ function NewIncomeModal({
             {accounts.map((a) => <option key={a.id} value={a.id}>{a.name} — {a.bank}</option>)}
           </Select>
         </Field>
+        <div className="grid" style={{ gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+          <Field label="À partir de (optionnel)">
+            <Input type="date" value={form.valid_from}
+              onChange={(e) => setForm({ ...form, valid_from: e.target.value })} />
+          </Field>
+          <Field label="Jusqu'au (optionnel)">
+            <Input type="date" value={form.valid_to}
+              onChange={(e) => setForm({ ...form, valid_to: e.target.value })} />
+          </Field>
+        </div>
+        <p className="small muted">
+          Utilise ces dates pour gérer un changement de salaire ou un revenu temporaire.
+        </p>
         {error && <ErrorBox message={error} />}
         <div className="row gap-2" style={{ justifyContent: 'flex-end', marginTop: 16 }}>
           <Button type="button" onClick={onClose}>Annuler</Button>
           <Button type="submit" variant="primary" disabled={submit.isPending}>
-            {submit.isPending ? 'Création…' : 'Créer'}
+            {submit.isPending ? 'Enregistrement…' : (isEdit ? 'Enregistrer' : 'Créer')}
           </Button>
         </div>
       </form>

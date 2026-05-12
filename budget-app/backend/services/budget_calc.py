@@ -76,13 +76,35 @@ def compute_my_share(charge: Charge) -> Decimal:
     return charge.total_amount
 
 
-def charge_is_active_in_month(charge: Charge, target_month: int) -> bool:
+def _in_validity_window(obj, year: int, month: int) -> bool:
+    """Vérifie qu'un objet (charge/income/transfer/saving) avec champs
+    optionnels valid_from / valid_to est actif sur le mois (year, month)."""
+    vf = getattr(obj, "valid_from", None)
+    vt = getattr(obj, "valid_to", None)
+    # Mois cible : on prend le 1er jour
+    from datetime import date as _date
+    target_start = _date(year, month, 1)
+    if month == 12:
+        target_end = _date(year + 1, 1, 1)
+    else:
+        target_end = _date(year, month + 1, 1)
+    if vf is not None and vf >= target_end:
+        return False  # commence après le mois
+    if vt is not None and vt < target_start:
+        return False  # expiré avant le mois
+    return True
+
+
+def charge_is_active_in_month(charge: Charge, target_month: int, year: int = None) -> bool:
     """Détermine si une charge est imputée sur le mois cible."""
     if not charge.is_active:
         return False
+    # Si l'appel ne fournit pas l'année (ancien code), on tolère mais on ne
+    # peut pas vérifier la fenêtre valid_from/valid_to — on suppose actif.
+    if year is not None and not _in_validity_window(charge, year, target_month):
+        return False
     if charge.frequency == Frequency.MENSUELLE:
         return True
-    # Pour les non-mensuelles, on regarde le mois renseigné
     return charge.month == target_month
 
 
@@ -118,6 +140,7 @@ def compute_monthly_budget(db: Session, user_id: int, year: int, month: int) -> 
         Income.user_id == user_id,
         Income.is_active.is_(True),
     ).all()
+    incomes = [i for i in incomes if _in_validity_window(i, year, month)]
     budget.total_incomes = sum((i.amount for i in incomes), Decimal(0))
 
     # ===== 2. CHARGES (ma part, mois actuel) =====
@@ -126,7 +149,7 @@ def compute_monthly_budget(db: Session, user_id: int, year: int, month: int) -> 
         Charge.is_active.is_(True),
     ).all()
     for charge in charges:
-        if charge_is_active_in_month(charge, month):
+        if charge_is_active_in_month(charge, month, year):
             budget.total_charges += compute_my_share(charge)
 
     # ===== 3. ÉPARGNE AUTO =====
@@ -134,6 +157,7 @@ def compute_monthly_budget(db: Session, user_id: int, year: int, month: int) -> 
         AutoSaving.user_id == user_id,
         AutoSaving.is_active.is_(True),
     ).all()
+    savings = [s for s in savings if _in_validity_window(s, year, month)]
     budget.total_savings = sum((s.amount for s in savings), Decimal(0))
 
     # ===== 4. ACHATS (imputés sur le mois, mensualités gérées) =====
@@ -178,6 +202,8 @@ def compute_monthly_budget(db: Session, user_id: int, year: int, month: int) -> 
             RecurringTransfer.frequency == Frequency.MENSUELLE,
         ).all()
         for tr in rec_transfers:
+            if not _in_validity_window(tr, year, month):
+                continue
             if tr.dest_account_id == acc.id:
                 summary.transfers_net += tr.amount
             if tr.source_account_id == acc.id:
@@ -195,7 +221,7 @@ def compute_monthly_budget(db: Session, user_id: int, year: int, month: int) -> 
 
         # Charges sur ce compte
         for charge in charges:
-            if charge.account_id == acc.id and charge_is_active_in_month(charge, month):
+            if charge.account_id == acc.id and charge_is_active_in_month(charge, month, year):
                 summary.charges -= compute_my_share(charge)
 
         # Épargne (compte source = - , destination = +)

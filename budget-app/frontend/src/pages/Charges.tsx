@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { FileText, Plus, Trash2 } from 'lucide-react';
+import { FileText, Plus, Trash2, Pencil } from 'lucide-react';
 import { api } from '../lib/api';
 import { eur, num } from '../lib/format';
 import { useSpaceAccountIdsSet } from '../lib/useSpaceAccounts';
@@ -17,6 +17,7 @@ import {
 export function Charges() {
   const qc = useQueryClient();
   const [creating, setCreating] = useState(false);
+  const [editing, setEditing] = useState<Charge | null>(null);
 
   const allCharges = useQuery({
     queryKey: ['charges'],
@@ -96,9 +97,14 @@ export function Charges() {
                     <td className="r num">{eur(c.total_amount)}</td>
                     <td className="r num neg display" style={{ fontSize: 17 }}>−{eur(c.my_share)}</td>
                     <td className="r">
-                      <Button variant="sm" onClick={() => { if (confirm(`Supprimer "${c.label}" ?`)) remove.mutate(c.id); }}>
-                        <Trash2 size={12} />
-                      </Button>
+                      <div className="row gap-2" style={{ justifyContent: 'flex-end' }}>
+                        <Button variant="sm" onClick={() => setEditing(c)} title="Modifier">
+                          <Pencil size={12} />
+                        </Button>
+                        <Button variant="sm" onClick={() => { if (confirm(`Supprimer "${c.label}" ?`)) remove.mutate(c.id); }} title="Supprimer">
+                          <Trash2 size={12} />
+                        </Button>
+                      </div>
                     </td>
                   </tr>
                 );
@@ -108,8 +114,10 @@ export function Charges() {
         </Card>
       )}
 
-      <NewChargeModal
-        open={creating} onClose={() => setCreating(false)}
+      <ChargeModal
+        open={creating || !!editing}
+        existing={editing}
+        onClose={() => { setCreating(false); setEditing(null); }}
         accounts={accounts.data ?? []}
         onSaved={() => {
           qc.invalidateQueries({ queryKey: ['charges'] });
@@ -120,9 +128,16 @@ export function Charges() {
   );
 }
 
-function NewChargeModal({
-  open, onClose, accounts, onSaved,
-}: { open: boolean; onClose: () => void; accounts: Account[]; onSaved: () => void }) {
+function ChargeModal({
+  open, onClose, accounts, existing, onSaved,
+}: {
+  open: boolean;
+  onClose: () => void;
+  accounts: Account[];
+  existing: Charge | null;
+  onSaved: () => void;
+}) {
+  const isEdit = !!existing;
   const [form, setForm] = useState<{
     label: string;
     total_amount: string;
@@ -133,40 +148,57 @@ function NewChargeModal({
     num_colocs: number;
     split_value: string;
     account_id: number | null;
-  }>({
+    valid_from: string;
+    valid_to: string;
+  }>(() => existing ? {
+    label: existing.label,
+    total_amount: existing.total_amount,
+    day_of_month: existing.day_of_month,
+    frequency: existing.frequency,
+    month: existing.month,
+    split_mode: existing.split_mode,
+    num_colocs: existing.num_colocs,
+    split_value: existing.split_value ?? '',
+    account_id: existing.account_id,
+    valid_from: existing.valid_from ?? '',
+    valid_to: existing.valid_to ?? '',
+  } : {
     label: '', total_amount: '0', day_of_month: 1,
-    frequency: 'Mensuelle',
+    frequency: 'Mensuelle' as Frequency,
     month: null,
-    split_mode: 'Perso',
+    split_mode: 'Perso' as SplitMode,
     num_colocs: 1,
     split_value: '',
     account_id: accounts[0]?.id ?? null,
+    valid_from: '',
+    valid_to: '',
   });
   const [error, setError] = useState<string | null>(null);
 
   const submit = useMutation({
     mutationFn: async () => {
-      await api.post('/charges/', {
+      const body = {
         ...form,
         total_amount: form.total_amount || '0',
         split_value: form.split_value || null,
-      });
+        valid_from: form.valid_from || null,
+        valid_to: form.valid_to || null,
+      };
+      if (isEdit && existing) {
+        await api.patch(`/charges/${existing.id}`, body);
+      } else {
+        await api.post('/charges/', body);
+      }
     },
     onSuccess: () => {
       onSaved();
-      setForm({
-        label: '', total_amount: '0', day_of_month: 1,
-        frequency: 'Mensuelle', month: null, split_mode: 'Perso',
-        num_colocs: 1, split_value: '',
-        account_id: accounts[0]?.id ?? null,
-      });
       onClose();
     },
     onError: (e) => setError(e instanceof Error ? e.message : 'Erreur'),
   });
 
   return (
-    <Modal open={open} onClose={onClose} title="Nouvelle charge">
+    <Modal open={open} onClose={onClose} title={isEdit ? 'Modifier la charge' : 'Nouvelle charge'}>
       <form onSubmit={(e) => { e.preventDefault(); setError(null); submit.mutate(); }}>
         <Field label="Libellé"><Input required value={form.label}
           onChange={(e) => setForm({ ...form, label: e.target.value })} /></Field>
@@ -213,14 +245,25 @@ function NewChargeModal({
             {accounts.map((a) => <option key={a.id} value={a.id}>{a.name} — {a.bank}</option>)}
           </Select>
         </Field>
+        <div className="grid" style={{ gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+          <Field label="À partir de (optionnel)">
+            <Input type="date" value={form.valid_from}
+              onChange={(e) => setForm({ ...form, valid_from: e.target.value })} />
+          </Field>
+          <Field label="Jusqu'au (optionnel)">
+            <Input type="date" value={form.valid_to}
+              onChange={(e) => setForm({ ...form, valid_to: e.target.value })} />
+          </Field>
+        </div>
         <p className="small muted">
-          {form.split_mode !== 'Perso' && 'Si ce compte est joint, les splits seront créés automatiquement pour chaque membre.'}
+          Laisse les dates vides pour une charge sans expiration.
+          {form.split_mode !== 'Perso' && ' Si ce compte est joint, les splits seront créés automatiquement pour chaque membre.'}
         </p>
         {error && <ErrorBox message={error} />}
         <div className="row gap-2" style={{ justifyContent: 'flex-end', marginTop: 16 }}>
           <Button type="button" onClick={onClose}>Annuler</Button>
           <Button type="submit" variant="primary" disabled={submit.isPending}>
-            {submit.isPending ? 'Création…' : 'Créer'}
+            {submit.isPending ? 'Enregistrement…' : (isEdit ? 'Enregistrer' : 'Créer')}
           </Button>
         </div>
       </form>
