@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { NavLink, Outlet, useLocation } from 'react-router-dom';
+import { Navigate, NavLink, Outlet, useLocation } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import type { LucideIcon } from 'lucide-react';
 import {
@@ -20,24 +20,25 @@ interface NavItem {
   icon: LucideIcon;
   section: 'Vue' | 'Mouvements' | 'Coloc' | 'Outils' | 'Pro';
   proOnly?: boolean;
+  colocAllowed: boolean;  // visible en scope coloc
 }
 
 const NAV: NavItem[] = [
-  { to: 'dashboard', label: 'Tableau de bord', icon: LayoutDashboard, section: 'Vue' },
-  { to: 'calendar', label: 'Calendrier', icon: CalendarDays, section: 'Vue' },
-  { to: 'monthly', label: 'Vue mensuelle', icon: BarChart3, section: 'Vue' },
-  { to: 'yearly', label: 'Vue annuelle', icon: BarChart3, section: 'Vue' },
-  { to: 'accounts', label: 'Comptes', icon: CreditCard, section: 'Mouvements' },
-  { to: 'incomes', label: 'Revenus', icon: TrendingUp, section: 'Mouvements' },
-  { to: 'charges', label: 'Charges', icon: FileText, section: 'Mouvements' },
-  { to: 'transfers', label: 'Virements', icon: ArrowLeftRight, section: 'Mouvements' },
-  { to: 'savings', label: 'Épargne', icon: PiggyBank, section: 'Mouvements' },
-  { to: 'purchases', label: 'Achats', icon: ShoppingBag, section: 'Mouvements' },
-  { to: 'coloc', label: 'Récap coloc', icon: Users, section: 'Coloc' },
-  { to: 'shopping', label: 'Courses', icon: ListChecks, section: 'Coloc' },
-  { to: 'simulator', label: 'Simulateur', icon: Calculator, section: 'Outils' },
-  { to: 'settings', label: 'Réglages', icon: SettingsIcon, section: 'Outils' },
-  { to: 'compta-pro', label: 'Compta-pro', icon: Briefcase, section: 'Pro', proOnly: true },
+  { to: 'dashboard', label: 'Tableau de bord', icon: LayoutDashboard, section: 'Vue', colocAllowed: false },
+  { to: 'calendar', label: 'Calendrier', icon: CalendarDays, section: 'Vue', colocAllowed: false },
+  { to: 'monthly', label: 'Vue mensuelle', icon: BarChart3, section: 'Vue', colocAllowed: false },
+  { to: 'yearly', label: 'Vue annuelle', icon: BarChart3, section: 'Vue', colocAllowed: false },
+  { to: 'accounts', label: 'Comptes', icon: CreditCard, section: 'Mouvements', colocAllowed: false },
+  { to: 'incomes', label: 'Revenus', icon: TrendingUp, section: 'Mouvements', colocAllowed: false },
+  { to: 'charges', label: 'Charges', icon: FileText, section: 'Mouvements', colocAllowed: false },
+  { to: 'transfers', label: 'Virements', icon: ArrowLeftRight, section: 'Mouvements', colocAllowed: false },
+  { to: 'savings', label: 'Épargne', icon: PiggyBank, section: 'Mouvements', colocAllowed: false },
+  { to: 'purchases', label: 'Achats', icon: ShoppingBag, section: 'Mouvements', colocAllowed: false },
+  { to: 'coloc', label: 'Récap coloc', icon: Users, section: 'Coloc', colocAllowed: true },
+  { to: 'shopping', label: 'Courses', icon: ListChecks, section: 'Coloc', colocAllowed: true },
+  { to: 'simulator', label: 'Simulateur', icon: Calculator, section: 'Outils', colocAllowed: false },
+  { to: 'settings', label: 'Réglages', icon: SettingsIcon, section: 'Outils', colocAllowed: false },
+  { to: 'compta-pro', label: 'Compta-pro', icon: Briefcase, section: 'Pro', proOnly: true, colocAllowed: false },
 ];
 
 const SECTIONS: NavItem['section'][] = ['Vue', 'Mouvements', 'Coloc', 'Pro', 'Outils'];
@@ -52,11 +53,23 @@ export function Layout() {
     queryFn: async () => (await api.get<Me>('/users/me')).data,
   });
   const proEnabled = me.data?.pro_enabled ?? false;
+  const sessionScope = me.data?.session_scope ?? 'full';
+  const isColocSession = sessionScope === 'coloc';
 
   const currentPath = location.pathname.split('/').filter(Boolean).pop() || 'dashboard';
+
+  // En scope coloc, certaines routes sont interdites → redirect vers shopping
+  if (isColocSession && currentPath && !NAV.find((n) => n.to === currentPath && n.colocAllowed)) {
+    return <Navigate to="/shopping" replace />;
+  }
+
   const currentTitle = NAV.find((n) => n.to === currentPath)?.label || 'Tableau de bord';
 
-  const visibleNav = NAV.filter((n) => !n.proOnly || proEnabled);
+  const visibleNav = NAV.filter((n) => {
+    if (isColocSession) return n.colocAllowed;
+    if (n.proOnly && !proEnabled) return false;
+    return true;
+  });
   const visibleSections = SECTIONS.filter((s) => visibleNav.some((n) => n.section === s));
 
   return (
@@ -68,7 +81,9 @@ export function Layout() {
             <>
               <div className="brand-name">
                 Budget Coloc
-                <small>HA · v0.3</small>
+                <small>
+                  {isColocSession ? 'Mode coloc' : 'HA · v0.4'}
+                </small>
               </div>
               <button className="collapse-btn" onClick={() => setCollapsed(true)} aria-label="Réduire">
                 <ChevronLeft size={14} />
@@ -83,8 +98,8 @@ export function Layout() {
           )}
         </div>
 
-        {/* Switcher Perso/Pro — visible seulement quand pro_enabled */}
-        {proEnabled && !collapsed && (
+        {/* Switcher Perso/Pro — masqué en scope coloc */}
+        {!isColocSession && proEnabled && !collapsed && (
           <div className="space-switcher">
             {(['perso', 'pro'] as const).map((s) => (
               <button key={s}
@@ -96,16 +111,6 @@ export function Layout() {
               </button>
             ))}
           </div>
-        )}
-        {proEnabled && collapsed && (
-          <button
-            className="collapse-btn"
-            style={{ margin: '4px auto 12px' }}
-            onClick={() => setSpace(space === 'perso' ? 'pro' : 'perso')}
-            title={space === 'perso' ? 'Passer en mode Pro' : 'Passer en mode Perso'}
-          >
-            <span className="dot" data-c={space} />
-          </button>
         )}
 
         <nav style={{ flex: 1, overflowY: 'auto' }}>
@@ -135,7 +140,7 @@ export function Layout() {
             <Menu size={16} />
           </button>
           <div style={{ fontFamily: 'var(--display)', fontSize: 22 }}>{currentTitle}</div>
-          {proEnabled ? (
+          {!isColocSession && proEnabled ? (
             <button
               className="space-pill-mobile"
               onClick={() => setSpace(space === 'perso' ? 'pro' : 'perso')}
@@ -191,16 +196,22 @@ export function Layout() {
         </div>
       )}
 
-      <TweaksPanel />
+      {!isColocSession && <TweaksPanel />}
       <OfflineBadge />
 
       <div className="mobile-nav">
-        {[
-          visibleNav.find((n) => n.to === 'dashboard')!,
-          visibleNav.find((n) => n.to === 'calendar')!,
-          visibleNav.find((n) => n.to === 'shopping')!,
-          visibleNav.find((n) => n.to === 'coloc')!,
-        ].map((item) => {
+        {(isColocSession
+          ? [
+              visibleNav.find((n) => n.to === 'shopping')!,
+              visibleNav.find((n) => n.to === 'coloc')!,
+            ].filter(Boolean)
+          : [
+              visibleNav.find((n) => n.to === 'dashboard')!,
+              visibleNav.find((n) => n.to === 'calendar')!,
+              visibleNav.find((n) => n.to === 'shopping')!,
+              visibleNav.find((n) => n.to === 'coloc')!,
+            ].filter(Boolean)
+        ).map((item) => {
           const Icon = item.icon;
           return (
             <NavLink key={item.to} to={item.to}

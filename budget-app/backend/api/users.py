@@ -23,6 +23,9 @@ class MeOut(BaseModel):
     external_username: Optional[str] = None
     external_scope: Optional[str] = None
     pro_enabled: bool
+    # Scope de la session courante : 'full' (ingress HA ou compte externe full)
+    # ou 'coloc' (compte externe scope coloc, accès limité)
+    session_scope: str = "full"
 
 
 class ProToggle(BaseModel):
@@ -54,7 +57,7 @@ class ExternalAccountPayload(BaseModel):
         return v
 
 
-def _to_me_out(db: Session, user: User) -> MeOut:
+def _to_me_out(db: Session, user: User, session_scope: str = "full") -> MeOut:
     cred = db.query(ExternalCredential).filter(ExternalCredential.user_id == user.id).first()
     return MeOut(
         user_id=user.id,
@@ -66,13 +69,15 @@ def _to_me_out(db: Session, user: User) -> MeOut:
         external_username=cred.username if cred else None,
         external_scope=(cred.scope.value if cred and hasattr(cred.scope, "value") else None),
         pro_enabled=bool(user.pro_enabled),
+        session_scope=session_scope,
     )
 
 
 @router.get("/me", response_model=MeOut)
 async def get_me(request: Request, db: Session = Depends(get_db)):
     user: User = request.state.user
-    return _to_me_out(db, user)
+    scope = getattr(request.state, "scope", "full")
+    return _to_me_out(db, user, session_scope=scope)
 
 
 @router.post("/me/pro-enabled", response_model=MeOut)

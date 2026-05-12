@@ -129,13 +129,18 @@ function HouseholdCard() {
   });
 
   const [name, setName] = useState('Mon foyer');
+  const [renaming, setRenaming] = useState(false);
+  const [renameValue, setRenameValue] = useState('');
   const [pickedUser, setPickedUser] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  const create = useMutation({
-    mutationFn: async () =>
-      (await api.post<HouseholdOut>('/households/me', { name })).data,
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['household'] }),
+  const upsert = useMutation({
+    mutationFn: async (newName: string) =>
+      (await api.post<HouseholdOut>('/households/me', { name: newName })).data,
+    onSuccess: () => {
+      setRenaming(false);
+      qc.invalidateQueries({ queryKey: ['household'] });
+    },
     onError: (e) => setError(e instanceof Error ? e.message : 'Erreur'),
   });
 
@@ -152,9 +157,15 @@ function HouseholdCard() {
     onSuccess: () => qc.invalidateQueries({ queryKey: ['household'] }),
   });
 
+  const remove = useMutation({
+    mutationFn: async () => api.delete('/households/me'),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['household'] }),
+  });
+
   const h = household.data;
   const memberIds = new Set((h?.members ?? []).map((m) => m.user_id));
   const picker = (available.data ?? []).filter((u) => !memberIds.has(u.user_id));
+  const isCreator = me.data?.user_id === h?.created_by_user_id;
 
   return (
     <Card>
@@ -173,8 +184,36 @@ function HouseholdCard() {
       {h ? (
         <>
           <div className="row between" style={{ marginBottom: 10 }}>
-            <strong style={{ fontSize: 14 }}>{h.name}</strong>
-            <span className="small muted">{h.members.length} membre{h.members.length > 1 ? 's' : ''}</span>
+            {renaming ? (
+              <div className="row gap-2" style={{ flex: 1 }}>
+                <Input value={renameValue}
+                  onChange={(e) => setRenameValue(e.target.value)}
+                  autoFocus
+                  style={{ flex: 1 }} />
+                <Button variant="primary" onClick={() => upsert.mutate(renameValue || h.name)}
+                  disabled={upsert.isPending}>
+                  OK
+                </Button>
+                <Button onClick={() => setRenaming(false)}>×</Button>
+              </div>
+            ) : (
+              <>
+                <strong style={{ fontSize: 14 }}>{h.name}</strong>
+                <div className="row gap-2">
+                  {isCreator && (
+                    <Button variant="sm" onClick={() => {
+                      setRenameValue(h.name);
+                      setRenaming(true);
+                    }}>
+                      Renommer
+                    </Button>
+                  )}
+                  <span className="small muted">
+                    {h.members.length} membre{h.members.length > 1 ? 's' : ''}
+                  </span>
+                </div>
+              </>
+            )}
           </div>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginBottom: 12 }}>
             {h.members.map((m) => (
@@ -189,7 +228,7 @@ function HouseholdCard() {
                     {m.is_creator ? 'créateur' : 'membre'}
                   </div>
                 </div>
-                {!m.is_creator && me.data?.user_id === h.created_by_user_id && (
+                {!m.is_creator && isCreator && (
                   <Button variant="sm" onClick={() => removeMember.mutate(m.user_id)}>
                     <Trash2 size={12} />
                   </Button>
@@ -198,8 +237,8 @@ function HouseholdCard() {
             ))}
           </div>
 
-          {me.data?.user_id === h.created_by_user_id && picker.length > 0 && (
-            <div className="row gap-2">
+          {isCreator && picker.length > 0 && (
+            <div className="row gap-2" style={{ marginBottom: 10 }}>
               <Select
                 value={pickedUser ?? ''}
                 onChange={(e) => setPickedUser(e.target.value ? Number(e.target.value) : null)}
@@ -221,6 +260,24 @@ function HouseholdCard() {
               </Button>
             </div>
           )}
+
+          {isCreator && (
+            <Button
+              onClick={() => {
+                if (confirm(
+                  `Supprimer le foyer "${h.name}" ? Tous les messages et les `
+                  + 'liaisons membres seront effacés. Les comptes bancaires sont conservés.',
+                )) {
+                  remove.mutate();
+                }
+              }}
+              style={{
+                marginTop: 8, color: 'var(--rose)', borderColor: 'var(--rose)',
+              }}
+            >
+              <Trash2 size={12} /> Supprimer le foyer
+            </Button>
+          )}
         </>
       ) : (
         <>
@@ -228,7 +285,7 @@ function HouseholdCard() {
             <Input value={name} onChange={(e) => setName(e.target.value)}
               placeholder="Ex : Pixel St-Marc" />
           </Field>
-          <Button variant="primary" onClick={() => create.mutate()} disabled={create.isPending}>
+          <Button variant="primary" onClick={() => upsert.mutate(name)} disabled={upsert.isPending}>
             <Plus size={14} /> Créer mon foyer
           </Button>
           <p className="small muted" style={{ marginTop: 10 }}>

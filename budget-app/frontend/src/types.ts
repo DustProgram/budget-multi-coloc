@@ -317,8 +317,11 @@ export interface Me {
   display_name: string | null;
   color_hex: string;
   is_admin: boolean;
-  has_external_token: boolean;
+  has_external_account: boolean;
+  external_username: string | null;
+  external_scope: 'coloc' | 'full' | null;
   pro_enabled: boolean;
+  session_scope: 'coloc' | 'full';
 }
 
 // ============================================================

@@ -1,5 +1,5 @@
 name: "Budget Multi-Coloc"
-version: "0.4.0"
+version: "0.4.1"
 slug: "budget_multi_coloc"
 description: "Gestionnaire de budget personnel et colocation avec stockage chiffré"
 url: "https://github.com/DustProgram/budget-multi-coloc/tree/main/budget-app"

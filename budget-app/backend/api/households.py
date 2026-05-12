@@ -191,6 +191,25 @@ async def remove_member(
     db.commit()
 
 
+@router.delete("/me", status_code=204)
+async def delete_household(request: Request, db: Session = Depends(get_db)):
+    """Supprime entièrement le foyer (réservé au créateur).
+    Cascade SQL supprime members, messages et reads."""
+    user: User = request.state.user
+    h = _my_household(db, user.id)
+    if h is None:
+        raise HTTPException(404, "Pas de foyer.")
+    if h.created_by_user_id != user.id:
+        raise HTTPException(403, "Seul le créateur peut supprimer le foyer.")
+    # Nettoyer manuellement les reads et messages (les FK CASCADE devraient
+    # s'en charger, mais on est explicite pour les anciens schémas).
+    from models import HouseholdMessageRead, Message
+    db.query(HouseholdMessageRead).filter(HouseholdMessageRead.household_id == h.id).delete()
+    db.query(Message).filter(Message.household_id == h.id).delete()
+    db.delete(h)
+    db.commit()
+
+
 # ============================================================
 # Chat global du foyer
 # ============================================================

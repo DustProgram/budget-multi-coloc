@@ -1,8 +1,12 @@
 """API d'auth pour le port externe.
 
 Public (avant le middleware d'auth) :
-- GET  /api/auth/login/users      → liste users HA + flag has_external_account
-- POST /api/auth/login/password   → username + password → cookie session + payload
+- POST /api/auth/login/password   → username + password → cookie session
+
+L'ancien endpoint GET /users a été retiré en 0.4.1 : exposer la liste
+des comptes HA et leurs usernames externes = fuite d'information. Si
+l'user a oublié son username, il doit le retrouver via l'ingress HA
+(Réglages → Compte externe l'affiche).
 """
 from datetime import datetime
 from typing import Optional
@@ -11,22 +15,13 @@ from fastapi import APIRouter, Depends, HTTPException, Response
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
-from models import ExternalCredential, ExternalScope, User
+from models import ExternalCredential, User
 from models.base import get_db
 from services.external_auth import (
     COOKIE_NAME, COOKIE_MAX_AGE, make_session_cookie, verify_password,
 )
 
 router = APIRouter()
-
-
-class LoginUserEntry(BaseModel):
-    user_id: int
-    display_name: str
-    ha_username: str
-    color_hex: str
-    has_external_account: bool
-    external_username: Optional[str] = None
 
 
 class PasswordLoginPayload(BaseModel):
@@ -38,28 +33,6 @@ class LoginOut(BaseModel):
     user_id: int
     display_name: str
     scope: str
-
-
-@router.get("/users", response_model=list[LoginUserEntry])
-async def list_users_for_login(db: Session = Depends(get_db)):
-    """Liste les users HA enregistrés avec flag 'compte externe configuré'.
-
-    Affiche aussi le username externe choisi par chacun, pour qu'on sache
-    avec quel login se connecter.
-    """
-    out: list[LoginUserEntry] = []
-    users = db.query(User).order_by(User.display_name, User.ha_username).all()
-    for u in users:
-        cred = db.query(ExternalCredential).filter(ExternalCredential.user_id == u.id).first()
-        out.append(LoginUserEntry(
-            user_id=u.id,
-            display_name=u.display_name or u.ha_username,
-            ha_username=u.ha_username,
-            color_hex=u.color_hex,
-            has_external_account=cred is not None,
-            external_username=cred.username if cred else None,
-        ))
-    return out
 
 
 @router.post("/password", response_model=LoginOut)
@@ -75,6 +48,7 @@ async def login_with_password(
         .first()
     )
     if not cred or not verify_password(payload.password, cred.password_hash):
+        # Message générique : ne pas révéler si le username existe ou pas
         raise HTTPException(401, "Identifiants invalides.")
 
     cred.last_login_at = datetime.utcnow()

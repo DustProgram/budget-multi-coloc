@@ -122,6 +122,12 @@ function AccountCard({ account, onManageMembers }: { account: Account; onManageM
   );
 }
 
+interface HouseholdLite {
+  id: number;
+  name: string;
+  members: { user_id: number; display_name: string }[];
+}
+
 function NewAccountModal({ open, onClose, onSaved }: { open: boolean; onClose: () => void; onSaved: () => void }) {
   const { space } = useSpace();
   const qc = useQueryClient();
@@ -135,6 +141,11 @@ function NewAccountModal({ open, onClose, onSaved }: { open: boolean; onClose: (
   const available = useQuery({
     queryKey: ['available-users'],
     queryFn: async () => (await api.get<UserPickerEntry[]>('/accounts/available-users')).data,
+    enabled: open,
+  });
+  const household = useQuery({
+    queryKey: ['household'],
+    queryFn: async () => (await api.get<HouseholdLite | null>('/households/me')).data,
     enabled: open,
   });
 
@@ -196,8 +207,23 @@ function NewAccountModal({ open, onClose, onSaved }: { open: boolean; onClose: (
 
         {isJoint && (
           <div style={{ marginTop: 6 }}>
-            <div className="eyebrow" style={{ marginBottom: 8 }}>
-              Co-titulaires (utilisateurs HA déjà inscrits)
+            <div className="row between" style={{ marginBottom: 8 }}>
+              <span className="eyebrow">Co-titulaires</span>
+              {household.data && household.data.members.length > 0 && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    // Pré-coche tous les membres du foyer (sauf moi, qui suis owner implicite)
+                    const others = household.data!.members
+                      .map((m) => m.user_id)
+                      .filter((id) => (available.data ?? []).some((u) => u.user_id === id));
+                    setMemberIds(others);
+                  }}
+                  className="btn sm"
+                >
+                  + Tout mon foyer ({household.data.name})
+                </button>
+              )}
             </div>
             {available.isLoading && <p className="muted small">Chargement…</p>}
             {available.data && available.data.length === 0 && (
