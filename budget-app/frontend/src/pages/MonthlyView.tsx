@@ -27,10 +27,13 @@ const TYPE_TONE: Record<EventType, 'sage' | 'rose' | 'plum' | 'amber'> = {
   purchase: 'amber',
 };
 
+type ViewMode = 'flux' | 'compte';
+
 export function MonthlyView() {
   const today = new Date();
   const [cursor, setCursor] = useState({ year: today.getFullYear(), month: today.getMonth() + 1 });
   const [filter, setFilter] = useState<AccountFilter>('all');
+  const [mode, setMode] = useState<ViewMode>('flux');
 
   const query = useQuery({
     queryKey: ['upcoming', 'monthly', cursor.year, cursor.month],
@@ -47,18 +50,19 @@ export function MonthlyView() {
     setCursor({ year: d.getFullYear(), month: d.getMonth() + 1 });
   }
 
-  // Set des account_ids qui matchent le filtre courant
+  // Set des account_ids qui matchent le filtre courant.
+  // 'perso' = compte solo (PAS de type "Compte joint"). Un compte que j'ai créé
+  // mais qui est en réalité partagé (type Compte joint) n'est pas perso : il
+  // appartient à tous ses co-titulaires.
   const filteredAccountIds = useMemo(() => {
     const all = accountsQ.data ?? [];
     if (filter === 'all') return new Set(all.map((a) => a.id));
     if (filter === 'perso') {
-      // perso = compte solo (space=perso ET pas joint multi-membres) ; on
-      // approxime simplement par space=perso
-      return new Set(all.filter((a) => a.space === 'perso').map((a) => a.id));
+      return new Set(
+        all.filter((a) => a.type !== 'Compte joint').map((a) => a.id),
+      );
     }
     if (filter === 'joint') {
-      // joint = type "Compte joint" OU compte avec members ≥ 2 (on n'a pas
-      // les members ici sans appel séparé) → on filtre sur le type
       return new Set(all.filter((a) => a.type === 'Compte joint').map((a) => a.id));
     }
     // filter is a specific account id
@@ -134,13 +138,45 @@ export function MonthlyView() {
       {query.isLoading && <Loader />}
       {query.isError && <ErrorBox message="Erreur de chargement." />}
 
-      {query.data && (
+      {query.data && (() => {
+        const accs = accountsQ.data ?? [];
+        const filteredAccs = accs.filter((a) => filteredAccountIds.has(a.id));
+        const currentBalance = filteredAccs.reduce((s, a) => s + num(a.initial_balance), 0);
+        const endBalance = currentBalance + totals.net;
+        return (
         <>
-          <div className="grid" style={{ gridTemplateColumns: 'repeat(3, 1fr)', gap: 16, marginBottom: 24 }}>
-            <Kpi label="Entrées" value={eur(totals.income)} subClass="pos" />
-            <Kpi label="Sorties" value={eur(totals.expense)} subClass="neg" />
-            <Kpi label="Solde net" value={eur(totals.net)}
-              subClass={totals.net >= 0 ? 'pos' : 'neg'} tinted />
+          <div className="row gap-2" style={{ marginBottom: 12, justifyContent: 'flex-end' }}>
+            <Button
+              variant={mode === 'flux' ? 'primary' : 'default'}
+              onClick={() => setMode('flux')}
+            >
+              Flux du mois
+            </Button>
+            <Button
+              variant={mode === 'compte' ? 'primary' : 'default'}
+              onClick={() => setMode('compte')}
+            >
+              Solde du compte
+            </Button>
+          </div>
+          <div className="grid kpi-row" style={{ gridTemplateColumns: 'repeat(3, 1fr)', gap: 16, marginBottom: 24 }}>
+            {mode === 'flux' ? (
+              <>
+                <Kpi label="Entrées" value={eur(totals.income)} subClass="pos" />
+                <Kpi label="Sorties" value={eur(totals.expense)} subClass="neg" />
+                <Kpi label="Solde net" value={eur(totals.net)}
+                  subClass={totals.net >= 0 ? 'pos' : 'neg'} tinted />
+              </>
+            ) : (
+              <>
+                <Kpi label="Solde actuel" value={eur(currentBalance)}
+                  sub={`${filteredAccs.length} compte${filteredAccs.length > 1 ? 's' : ''}`} />
+                <Kpi label="Sorties du mois" value={eur(totals.expense)} subClass="neg" />
+                <Kpi label="Solde fin de mois" value={eur(endBalance)}
+                  subClass={endBalance >= 0 ? 'pos' : 'neg'} tinted
+                  sub={`${totals.net >= 0 ? '+' : ''}${eur(totals.net)} net`} />
+              </>
+            )}
           </div>
 
           {curve.length > 0 && (
@@ -191,7 +227,8 @@ export function MonthlyView() {
             </Card>
           )}
         </>
-      )}
+        );
+      })()}
     </>
   );
 }

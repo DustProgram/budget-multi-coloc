@@ -54,8 +54,18 @@ export function Field({ label, children }: { label: string; children: ReactNode 
   );
 }
 
-export function Input(props: InputHTMLAttributes<HTMLInputElement>) {
-  return <input {...props} className={classNames('input', props.className)} />;
+export function Input({ onFocus, ...props }: InputHTMLAttributes<HTMLInputElement>) {
+  const isNumeric = props.type === 'number';
+  return (
+    <input
+      {...props}
+      className={classNames('input', props.className)}
+      onFocus={(e) => {
+        if (isNumeric) e.target.select();
+        onFocus?.(e);
+      }}
+    />
+  );
 }
 
 export function Select(props: SelectHTMLAttributes<HTMLSelectElement>) {
@@ -122,21 +132,11 @@ interface ModalProps {
 export function Modal({ open, onClose, title, children, width = 480 }: ModalProps) {
   if (!open) return null;
   return (
-    <div
-      onClick={onClose}
-      style={{
-        position: 'fixed', inset: 0, background: 'rgba(28,25,23,0.4)',
-        display: 'flex', alignItems: 'center', justifyContent: 'center',
-        padding: 16, zIndex: 100,
-      }}
-    >
+    <div className="modal-overlay" onClick={onClose}>
       <div
+        className="modal-content"
         onClick={(e) => e.stopPropagation()}
-        style={{
-          background: 'var(--bg-elev)', border: '1px solid var(--line)',
-          borderRadius: 'var(--radius-lg)', padding: 24,
-          width: `min(${width}px, 100%)`, maxHeight: '90vh', overflowY: 'auto',
-        }}
+        style={{ width: `min(${width}px, 100%)` }}
       >
         <h2 style={{ fontFamily: 'var(--display)', fontSize: 26, margin: '0 0 16px', letterSpacing: '-0.01em' }}>
           {title}
@@ -146,3 +146,4 @@ export function Modal({ open, onClose, title, children, width = 480 }: ModalProp
     </div>
   );
 }
+

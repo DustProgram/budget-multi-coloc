@@ -101,7 +101,7 @@ export const FREQUENCIES = [
 ] as const;
 export type Frequency = (typeof FREQUENCIES)[number];
 
-export const SPLIT_MODES = ['Perso', 'Égal', 'Pourcentage', 'Montant fixe'] as const;
+export const SPLIT_MODES = ['Perso', 'Égal', 'Pourcentage', 'Montant fixe', 'Par utilisateur'] as const;
 export type SplitMode = (typeof SPLIT_MODES)[number];
 
 export interface ChargeSplit {
@@ -126,7 +126,8 @@ export interface Charge {
   notes: string | null;
   is_active: boolean;
   my_share: string;
-  payer_user_id: number;
+  // null quand la charge est payée par le compte joint (organisme externe)
+  payer_user_id: number | null;
   splits: ChargeSplit[];
   valid_from: string | null;
   valid_to: string | null;
