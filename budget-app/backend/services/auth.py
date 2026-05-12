@@ -2,20 +2,15 @@
 
 Trois modes :
 
-1. **Ingress HA** : header ``X-Remote-User-Id`` (injecté par le supervisor).
-   L'user est cherché/créé en DB et attaché à ``request.state.user``.
-   Scope implicite : 'full'.
-
-2. **Port externe (8765) avec compte externe** : cookie ``budget_session``
-   posé après login via ``POST /api/auth/login/password``. Le cookie est
-   signé HMAC et contient ``{user_id, scope}``. Le middleware filtre les
-   chemins API selon le scope ('coloc' = courses+chat+récap, 'full' = tout).
-
+1. **Ingress HA** : header ``X-Remote-User-Id``. L'user est cherché/créé en DB
+   et attaché à ``request.state.user``. Scope implicite : 'full'.
+2. **Port externe (8765)** : cookie ``budget_session`` HMAC contenant
+   ``{user_id, scope}``. Le scope filtre les chemins API.
 3. **Mode dev** : env ``DEV_MODE=true`` → user de test 'DevUser'.
 
-Le legacy token externe (User.external_token) est conservé silencieusement
-pour les URLs déjà partagées, mais le système recommandé est désormais
-le compte externe (username + password).
+Optim α2 : le mapping ``ha_user_id → user_id`` est cached module-level
+(immutable une fois créé). Évite la query ``WHERE ha_user_id = ?`` à
+chaque requête au profit d'un ``db.get(User, id)`` (PK lookup).
 """
 import os
 import logging
@@ -24,6 +19,7 @@ from typing import Optional
 from fastapi import Request
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.responses import JSONResponse
+from sqlalchemy.orm import Session
 
 from models.base import SessionLocal
 from models import ExternalScope, User
@@ -37,10 +33,16 @@ PUBLIC_PATHS_PREFIX = (
     "/api/health",
     "/api/docs",
     "/api/openapi.json",
-    "/api/auth/login",          # login externe : liste users + password
-    "/api/auth/logout",         # logout — toujours public (clear cookie)
+    "/api/auth/login",
+    "/api/auth/logout",
 )
 PUBLIC_PATHS = set(PUBLIC_PATHS_PREFIX)
+
+
+# Cache module-level immutable : ha_user_id → user_id.
+# Le mapping ne change pas une fois un user créé, donc pas de TTL nécessaire.
+# Permet d'éviter la query WHERE ha_user_id = ? à chaque requête.
+_HA_TO_USER_ID: dict[str, int] = {}
 
 
 class HAUserMiddleware(BaseHTTPMiddleware):
@@ -66,7 +68,7 @@ class HAUserMiddleware(BaseHTTPMiddleware):
             request.state.scope = ExternalScope.FULL.value
             return await call_next(request)
 
-        # 1) Headers ingress HA présents → flux nominal, scope 'full'
+        # 1) Ingress HA
         ha_user_id = request.headers.get("X-Remote-User-Id")
         if ha_user_id:
             ha_username = request.headers.get("X-Remote-User-Name", "Unknown")
@@ -76,7 +78,7 @@ class HAUserMiddleware(BaseHTTPMiddleware):
             request.state.scope = ExternalScope.FULL.value
             return await call_next(request)
 
-        # 2) Cookie session externe ?
+        # 2) Cookie session externe
         cookie = request.cookies.get(COOKIE_NAME)
         session = read_session_cookie(cookie) if cookie else None
         if session:
@@ -92,7 +94,7 @@ class HAUserMiddleware(BaseHTTPMiddleware):
                     content={"detail": f"Scope '{scope}' insuffisant pour {path}."},
                 )
 
-        # 3) Legacy : Bearer/?token sur l'ancien User.external_token (compat 0.3.x)
+        # 3) Legacy : Bearer/?token (compat 0.3.x)
         token = self._extract_legacy_token(request)
         if token:
             user = self._find_user_by_legacy_token(token)
@@ -101,7 +103,6 @@ class HAUserMiddleware(BaseHTTPMiddleware):
                 request.state.scope = ExternalScope.FULL.value
                 return await call_next(request)
 
-        # Pas d'auth → 401 (le frontend redirige vers la page login)
         return JSONResponse(
             status_code=401,
             content={
@@ -124,7 +125,7 @@ class HAUserMiddleware(BaseHTTPMiddleware):
             return None
         db = SessionLocal()
         try:
-            return db.query(User).filter(User.id == user_id).first()
+            return db.get(User, user_id)
         finally:
             db.close()
 
@@ -136,23 +137,41 @@ class HAUserMiddleware(BaseHTTPMiddleware):
         finally:
             db.close()
 
-    @staticmethod
-    def _get_or_create_user(ha_user_id: str, ha_username: str, display: Optional[str] = None) -> User:
-        db = SessionLocal()
+    @classmethod
+    def _get_or_create_user(
+        cls, ha_user_id: str, ha_username: str, display: Optional[str] = None,
+    ) -> User:
+        db: Session = SessionLocal()
         try:
+            # Fast path : ha_user_id déjà connu → db.get par PK (cache identité SQLA)
+            cached_id = _HA_TO_USER_ID.get(ha_user_id)
+            if cached_id is not None:
+                u = db.get(User, cached_id)
+                if u is not None:
+                    return u
+                # User supprimé en DB depuis le cache : on invalide et on retombe
+                _HA_TO_USER_ID.pop(ha_user_id, None)
+
+            # Slow path : query WHERE ha_user_id puis cache
             user = db.query(User).filter(User.ha_user_id == ha_user_id).first()
-            if not user:
-                is_first = db.query(User).count() == 0
-                user = User(
-                    ha_user_id=ha_user_id,
-                    ha_username=ha_username,
-                    display_name=display,
-                    is_admin=is_first,
-                )
-                db.add(user)
-                db.commit()
-                db.refresh(user)
-                logger.info("Nouvel utilisateur créé : %s (admin=%s)", ha_username, is_first)
+            if user is not None:
+                _HA_TO_USER_ID[ha_user_id] = user.id
+                return user
+
+            # Création : 1er user = admin
+            is_first = db.query(User).count() == 0
+            user = User(
+                ha_user_id=ha_user_id,
+                ha_username=ha_username,
+                display_name=display,
+                is_admin=is_first,
+            )
+            db.add(user)
+            db.commit()
+            # Pas de refresh : les defaults Python sont déjà en place et on
+            # n'utilise pas l'id dans la suite du flow.
+            _HA_TO_USER_ID[ha_user_id] = user.id
+            logger.info("Nouvel utilisateur créé : %s (admin=%s)", ha_username, is_first)
             return user
         finally:
             db.close()
