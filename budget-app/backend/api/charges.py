@@ -156,13 +156,16 @@ async def update_charge(
     payload: ChargeUpdate,
     db: Session = Depends(get_db),
 ):
+    """Tout co-titulaire (role owner ou cotitulaire) du compte porteur de
+    la charge peut la modifier. Pour les charges sur compte solo, seul le
+    propriétaire (créateur) peut éditer."""
     user: User = request.state.user
     ch = db.query(Charge).filter(Charge.id == charge_id).first()
     if not ch:
         raise HTTPException(404, "Charge introuvable")
-    # Seul le créateur de la charge (payeur) peut la modifier
-    if ch.user_id != user.id:
-        raise HTTPException(403, "Modification réservée au créateur de la charge")
+    if not ch.account_id or not user_can_write_account(db, user.id, ch.account_id):
+        if ch.user_id != user.id:
+            raise HTTPException(403, "Modification réservée aux co-titulaires du compte.")
 
     for k, v in payload.model_dump(exclude_unset=True).items():
         setattr(ch, k, v)
@@ -179,12 +182,14 @@ async def delete_charge(
     request: Request,
     db: Session = Depends(get_db),
 ):
+    """Idem PATCH : tout co-titulaire du compte joint peut supprimer."""
     user: User = request.state.user
-    ch = db.query(Charge).filter(
-        Charge.id == charge_id, Charge.user_id == user.id,
-    ).first()
+    ch = db.query(Charge).filter(Charge.id == charge_id).first()
     if not ch:
         raise HTTPException(404, "Charge introuvable")
+    if not ch.account_id or not user_can_write_account(db, user.id, ch.account_id):
+        if ch.user_id != user.id:
+            raise HTTPException(403, "Suppression réservée aux co-titulaires du compte.")
     db.delete(ch)
     db.commit()
 

@@ -8,10 +8,21 @@ from pydantic import BaseModel
 from sqlalchemy import extract
 from sqlalchemy.orm import Session
 
+from sqlalchemy import or_
+
 from models.base import get_db
 from models import Purchase, PaymentMethod, Settings, User
+from services.access import accessible_account_ids, user_can_write_account
 from services.budget_calc import compute_monthly_budget
 from services import notifier
+
+
+def _can_write_purchase(db: Session, user: User, p: Purchase) -> bool:
+    if p.user_id == user.id:
+        return True
+    if p.account_id and user_can_write_account(db, user.id, p.account_id):
+        return True
+    return False
 
 router = APIRouter()
 
@@ -78,7 +89,10 @@ async def list_purchases(
     category: Optional[str] = None,
 ):
     user: User = request.state.user
-    q = db.query(Purchase).filter(Purchase.user_id == user.id)
+    acc_ids = accessible_account_ids(db, user.id)
+    q = db.query(Purchase).filter(
+        or_(Purchase.user_id == user.id, Purchase.account_id.in_(acc_ids))
+    )
     if year is not None:
         q = q.filter(extract("year", Purchase.date) == year)
     if month is not None:
@@ -95,6 +109,8 @@ async def create_purchase(
     db: Session = Depends(get_db),
 ):
     user: User = request.state.user
+    if payload.account_id and not user_can_write_account(db, user.id, payload.account_id):
+        raise HTTPException(403, "Pas le droit d'écrire sur ce compte.")
     p = Purchase(**payload.model_dump(), user_id=user.id)
     db.add(p)
     db.commit()
@@ -129,11 +145,11 @@ async def update_purchase(
     db: Session = Depends(get_db),
 ):
     user: User = request.state.user
-    p = db.query(Purchase).filter(
-        Purchase.id == purchase_id, Purchase.user_id == user.id,
-    ).first()
+    p = db.query(Purchase).filter(Purchase.id == purchase_id).first()
     if not p:
         raise HTTPException(404, "Achat introuvable")
+    if not _can_write_purchase(db, user, p):
+        raise HTTPException(403, "Pas le droit de modifier cet achat.")
     for k, v in payload.model_dump(exclude_unset=True).items():
         setattr(p, k, v)
     db.commit()
@@ -148,10 +164,10 @@ async def delete_purchase(
     db: Session = Depends(get_db),
 ):
     user: User = request.state.user
-    p = db.query(Purchase).filter(
-        Purchase.id == purchase_id, Purchase.user_id == user.id,
-    ).first()
+    p = db.query(Purchase).filter(Purchase.id == purchase_id).first()
     if not p:
         raise HTTPException(404, "Achat introuvable")
+    if not _can_write_purchase(db, user, p):
+        raise HTTPException(403, "Pas le droit de supprimer cet achat.")
     db.delete(p)
     db.commit()

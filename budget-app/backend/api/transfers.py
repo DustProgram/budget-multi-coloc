@@ -14,6 +14,18 @@ from sqlalchemy.orm import Session
 
 from models.base import get_db
 from models import RecurringTransfer, OneTimeTransfer, Frequency, User
+from services.access import accessible_account_ids, user_can_write_account
+from sqlalchemy import or_
+
+
+def _can_write_transfer(db: Session, user: User, tr) -> bool:
+    """Co-titulaire d'un des comptes (source ou dest) du virement, ou créateur."""
+    if tr.user_id == user.id:
+        return True
+    for acc_id in (tr.source_account_id, tr.dest_account_id):
+        if acc_id and user_can_write_account(db, user.id, acc_id):
+            return True
+    return False
 
 router = APIRouter()
 
@@ -65,8 +77,16 @@ async def list_recurring(
     db: Session = Depends(get_db),
     include_inactive: bool = False,
 ):
+    """Mes virements + virements sur les comptes que je peux voir."""
     user: User = request.state.user
-    q = db.query(RecurringTransfer).filter(RecurringTransfer.user_id == user.id)
+    acc_ids = accessible_account_ids(db, user.id)
+    q = db.query(RecurringTransfer).filter(
+        or_(
+            RecurringTransfer.user_id == user.id,
+            RecurringTransfer.source_account_id.in_(acc_ids),
+            RecurringTransfer.dest_account_id.in_(acc_ids),
+        )
+    )
     if not include_inactive:
         q = q.filter(RecurringTransfer.is_active.is_(True))
     return q.order_by(RecurringTransfer.day_of_month).all()
@@ -79,6 +99,12 @@ async def create_recurring(
     db: Session = Depends(get_db),
 ):
     user: User = request.state.user
+    # On peut écrire si on est co-titulaire d'au moins un des comptes
+    if not (
+        user_can_write_account(db, user.id, payload.source_account_id)
+        or user_can_write_account(db, user.id, payload.dest_account_id)
+    ):
+        raise HTTPException(403, "Pas le droit d'écrire sur ces comptes.")
     tr = RecurringTransfer(**payload.model_dump(), user_id=user.id)
     db.add(tr)
     db.commit()
@@ -94,11 +120,11 @@ async def update_recurring(
     db: Session = Depends(get_db),
 ):
     user: User = request.state.user
-    tr = db.query(RecurringTransfer).filter(
-        RecurringTransfer.id == transfer_id, RecurringTransfer.user_id == user.id,
-    ).first()
+    tr = db.query(RecurringTransfer).filter(RecurringTransfer.id == transfer_id).first()
     if not tr:
         raise HTTPException(404, "Virement récurrent introuvable")
+    if not _can_write_transfer(db, user, tr):
+        raise HTTPException(403, "Pas le droit de modifier ce virement.")
     for k, v in payload.model_dump(exclude_unset=True).items():
         setattr(tr, k, v)
     db.commit()
@@ -113,11 +139,11 @@ async def delete_recurring(
     db: Session = Depends(get_db),
 ):
     user: User = request.state.user
-    tr = db.query(RecurringTransfer).filter(
-        RecurringTransfer.id == transfer_id, RecurringTransfer.user_id == user.id,
-    ).first()
+    tr = db.query(RecurringTransfer).filter(RecurringTransfer.id == transfer_id).first()
     if not tr:
         raise HTTPException(404, "Virement récurrent introuvable")
+    if not _can_write_transfer(db, user, tr):
+        raise HTTPException(403, "Pas le droit de supprimer ce virement.")
     db.delete(tr)
     db.commit()
 
@@ -165,7 +191,14 @@ async def list_onetime(
     month: Optional[int] = None,
 ):
     user: User = request.state.user
-    q = db.query(OneTimeTransfer).filter(OneTimeTransfer.user_id == user.id)
+    acc_ids = accessible_account_ids(db, user.id)
+    q = db.query(OneTimeTransfer).filter(
+        or_(
+            OneTimeTransfer.user_id == user.id,
+            OneTimeTransfer.source_account_id.in_(acc_ids),
+            OneTimeTransfer.dest_account_id.in_(acc_ids),
+        )
+    )
     if year is not None:
         from sqlalchemy import extract
         q = q.filter(extract("year", OneTimeTransfer.date) == year)
@@ -182,6 +215,11 @@ async def create_onetime(
     db: Session = Depends(get_db),
 ):
     user: User = request.state.user
+    if not (
+        user_can_write_account(db, user.id, payload.source_account_id)
+        or user_can_write_account(db, user.id, payload.dest_account_id)
+    ):
+        raise HTTPException(403, "Pas le droit d'écrire sur ces comptes.")
     tr = OneTimeTransfer(**payload.model_dump(), user_id=user.id)
     db.add(tr)
     db.commit()
@@ -197,11 +235,11 @@ async def update_onetime(
     db: Session = Depends(get_db),
 ):
     user: User = request.state.user
-    tr = db.query(OneTimeTransfer).filter(
-        OneTimeTransfer.id == transfer_id, OneTimeTransfer.user_id == user.id,
-    ).first()
+    tr = db.query(OneTimeTransfer).filter(OneTimeTransfer.id == transfer_id).first()
     if not tr:
         raise HTTPException(404, "Virement ponctuel introuvable")
+    if not _can_write_transfer(db, user, tr):
+        raise HTTPException(403, "Pas le droit de modifier ce virement.")
     for k, v in payload.model_dump(exclude_unset=True).items():
         setattr(tr, k, v)
     db.commit()
@@ -216,10 +254,10 @@ async def delete_onetime(
     db: Session = Depends(get_db),
 ):
     user: User = request.state.user
-    tr = db.query(OneTimeTransfer).filter(
-        OneTimeTransfer.id == transfer_id, OneTimeTransfer.user_id == user.id,
-    ).first()
+    tr = db.query(OneTimeTransfer).filter(OneTimeTransfer.id == transfer_id).first()
     if not tr:
         raise HTTPException(404, "Virement ponctuel introuvable")
+    if not _can_write_transfer(db, user, tr):
+        raise HTTPException(403, "Pas le droit de supprimer ce virement.")
     db.delete(tr)
     db.commit()
