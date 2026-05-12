@@ -1,0 +1,17 @@
+# Python
+backend/.venv/
+**/__pycache__/
+backend/.pytest_cache/
+backend/*.db
+backend/*.db-wal
+backend/*.db-shm
+
+# Frontend build artifacts
+frontend/dist/
+frontend/node_modules/
+frontend/*.tsbuildinfo
+frontend/vite.config.d.ts
+frontend/vite.config.js
+
+# OS
+.DS_Store

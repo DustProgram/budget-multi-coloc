@@ -71,6 +71,12 @@ class ShoppingPriority(str, Enum):
     URGENT = "urgent"
 
 
+class AccountMemberRole(str, Enum):
+    OWNER = "owner"
+    COTITULAIRE = "cotitulaire"
+    VIEWER = "viewer"
+
+
 # ============================================================
 # Utilisateurs (synchros avec HA via Ingress)
 # ============================================================
@@ -108,10 +114,33 @@ class Account(Base):
     created_at = Column(DateTime, default=datetime.utcnow)
 
     user = relationship("User", backref="accounts")
+    members = relationship("AccountMember", back_populates="account", cascade="all, delete-orphan")
 
     __table_args__ = (
         Index("ix_accounts_user_active", "user_id", "is_active"),
     )
+
+
+# ============================================================
+# Membres d'un compte joint (multi-utilisateurs)
+# ============================================================
+
+class AccountMember(Base):
+    """Table de jointure compte ↔ user pour les comptes joints.
+
+    Le champ ``Account.user_id`` reste le créateur du compte (owner par défaut).
+    Cette table permet d'ajouter des cotitulaires/viewers qui voient le compte
+    et ses lignes (charges, transactions) dans leur propre vue.
+    """
+    __tablename__ = "account_members"
+
+    account_id = Column(Integer, ForeignKey("accounts.id", ondelete="CASCADE"), primary_key=True)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), primary_key=True)
+    role = Column(SQLEnum(AccountMemberRole), nullable=False, default=AccountMemberRole.COTITULAIRE)
+    joined_at = Column(DateTime, default=datetime.utcnow)
+
+    account = relationship("Account", back_populates="members")
+    user = relationship("User")
 
 
 # ============================================================
@@ -159,6 +188,26 @@ class Charge(Base):
 
     user = relationship("User", backref="charges")
     account = relationship("Account")
+    splits = relationship("ChargeSplit", back_populates="charge", cascade="all, delete-orphan")
+
+
+class ChargeSplit(Base):
+    """Répartition persistée d'une charge partagée sur un compte joint.
+
+    Créé automatiquement à l'insert d'une `Charge` portée par un compte avec
+    `AccountMember`. Permet de marquer chaque part comme remboursée (`settled_at`)
+    et de calculer "qui doit quoi à qui" sans recalculer depuis zéro.
+    """
+    __tablename__ = "charge_splits"
+
+    id = Column(Integer, primary_key=True)
+    charge_id = Column(Integer, ForeignKey("charges.id", ondelete="CASCADE"), nullable=False, index=True)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    amount = Column(Numeric(12, 2), nullable=False)
+    settled_at = Column(DateTime, nullable=True)
+
+    charge = relationship("Charge", back_populates="splits")
+    user = relationship("User")
 
 
 # ============================================================

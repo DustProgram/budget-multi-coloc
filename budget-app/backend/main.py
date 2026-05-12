@@ -14,7 +14,11 @@ from fastapi.responses import FileResponse, HTMLResponse
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
 
-from api import accounts, incomes, charges, transfers, savings, purchases, shopping, coloc, simulator, dashboard, health, calendar as calendar_api
+from api import (
+    accounts, account_members, incomes, charges, charge_splits,
+    transfers, savings, purchases, shopping, coloc, simulator, dashboard,
+    health, calendar as calendar_api,
+)
 from models.base import init_db
 from services.backup import perform_monthly_backup
 from services.auth import HAUserMiddleware
@@ -78,8 +82,10 @@ app.add_middleware(HAUserMiddleware)
 # ===== Routes API =====
 app.include_router(health.router, prefix="/api/health", tags=["health"])
 app.include_router(accounts.router, prefix="/api/accounts", tags=["accounts"])
+app.include_router(account_members.router, prefix="/api/accounts", tags=["account-members"])
 app.include_router(incomes.router, prefix="/api/incomes", tags=["incomes"])
 app.include_router(charges.router, prefix="/api/charges", tags=["charges"])
+app.include_router(charge_splits.router, prefix="/api/charge-splits", tags=["charge-splits"])
 app.include_router(transfers.router, prefix="/api/transfers", tags=["transfers"])
 app.include_router(savings.router, prefix="/api/savings", tags=["savings"])
 app.include_router(purchases.router, prefix="/api/purchases", tags=["purchases"])

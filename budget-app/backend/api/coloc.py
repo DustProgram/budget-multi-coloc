@@ -1,6 +1,6 @@
-"""API Récap colocation - répartition des charges partagées et PDF.
+"""API Récap colocation — répartition des charges partagées, min-cash-flow, PDF.
 
-Ressource partagée entre tous les colocs (pas de filtrage par user_id).
+Ressource partagée — pas de filtrage par user_id (chaque coloc voit le même résumé).
 """
 import tempfile
 from pathlib import Path
@@ -16,14 +16,13 @@ router = APIRouter()
 
 
 def _serialize(data: dict) -> dict:
-    """Convertit les dataclasses en dict JSON-serializable."""
     return {
         "charges_lines": [
             {
                 "charge_id": l.charge_id,
                 "label": l.label,
-                "total": l.total,
-                "per_person": l.per_person,
+                "total": float(l.total),
+                "per_person": {str(k): float(v) for k, v in l.per_person.items()},
                 "split_mode": l.split_mode,
                 "payer_user_id": l.payer_user_id,
             }
@@ -35,22 +34,25 @@ def _serialize(data: dict) -> dict:
                 "month": s.month,
                 "user_id": s.user_id,
                 "user_name": s.user_name,
-                "total_due": s.total_due,
+                "total_due": float(s.total_due),
+                "total_paid": float(s.total_paid),
+                "balance": float(s.balance),
                 "by_charge": [
                     {
                         "charge_id": l.charge_id,
                         "label": l.label,
-                        "total": l.total,
+                        "total": float(l.total),
                         "split_mode": l.split_mode,
-                        "my_share": l.per_person.get(s.user_id),
+                        "my_share": float(l.per_person.get(s.user_id, 0)),
                     }
                     for l in s.by_charge
                 ],
-                "owes_to": s.owes_to,
             }
             for s in data["summaries"]
         ],
-        "debts": data["debts"],
+        "debts": [
+            {**d, "amount": float(d["amount"])} for d in data["debts"]
+        ],
     }
 
 

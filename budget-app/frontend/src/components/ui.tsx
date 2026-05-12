@@ -1,92 +1,148 @@
-import { type ReactNode, type InputHTMLAttributes, type SelectHTMLAttributes, type TextareaHTMLAttributes, type ButtonHTMLAttributes } from 'react';
+import {
+  type ReactNode, type InputHTMLAttributes, type SelectHTMLAttributes,
+  type TextareaHTMLAttributes, type ButtonHTMLAttributes,
+} from 'react';
 import { classNames } from '../lib/format';
 
-export function PageHeader({ icon, title, children }: { icon?: ReactNode; title: string; children?: ReactNode }) {
+export function PageHeader({
+  eyebrow, title, subtitle, children,
+}: {
+  eyebrow?: ReactNode;
+  title: ReactNode;
+  subtitle?: ReactNode;
+  children?: ReactNode;
+}) {
   return (
-    <header className="flex items-center justify-between mb-6 flex-wrap gap-3">
-      <div className="flex items-center gap-2">
-        {icon && <span className="text-brand">{icon}</span>}
-        <h2 className="text-2xl font-bold">{title}</h2>
+    <header className="page-header">
+      <div>
+        {eyebrow && <p className="eyebrow" style={{ margin: 0 }}>{eyebrow}</p>}
+        <h1 className="page-title" style={{ marginTop: 6 }}>{title}</h1>
+        {subtitle && <p className="page-sub">{subtitle}</p>}
       </div>
-      {children}
+      {children && <div className="row gap-2">{children}</div>}
     </header>
   );
 }
 
-export function Card({ children, className }: { children: ReactNode; className?: string }) {
-  return (
-    <div className={classNames('bg-white rounded-lg shadow-sm p-4', className)}>{children}</div>
-  );
+export function Card({ children, className, style }: { children: ReactNode; className?: string; style?: React.CSSProperties }) {
+  return <div className={classNames('card', className)} style={style}>{children}</div>;
 }
+
+type ButtonVariant = 'default' | 'primary' | 'accent' | 'ghost' | 'sm';
 
 export function Button({
-  variant = 'primary',
+  variant = 'default',
   className,
   ...props
-}: ButtonHTMLAttributes<HTMLButtonElement> & { variant?: 'primary' | 'secondary' | 'danger' | 'ghost' }) {
-  const styles: Record<string, string> = {
-    primary: 'bg-brand text-white hover:bg-brand-dark',
-    secondary: 'bg-slate-100 text-slate-700 hover:bg-slate-200',
-    danger: 'bg-rose-600 text-white hover:bg-rose-700',
-    ghost: 'text-slate-600 hover:bg-slate-100',
+}: ButtonHTMLAttributes<HTMLButtonElement> & { variant?: ButtonVariant }) {
+  const classes: Record<ButtonVariant, string> = {
+    default: 'btn',
+    primary: 'btn primary',
+    accent: 'btn accent',
+    ghost: 'btn ghost',
+    sm: 'btn sm',
   };
-  return (
-    <button
-      {...props}
-      className={classNames(
-        'inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm font-medium transition disabled:opacity-50 disabled:cursor-not-allowed',
-        styles[variant],
-        className,
-      )}
-    />
-  );
+  return <button {...props} className={classNames(classes[variant], className)} />;
 }
 
-export function Label({ children, htmlFor }: { children: ReactNode; htmlFor?: string }) {
+export function Field({ label, children }: { label: string; children: ReactNode }) {
   return (
-    <label htmlFor={htmlFor} className="block text-xs font-medium text-slate-600 mb-1">
+    <label className="field">
+      <span className="field-label">{label}</span>
       {children}
     </label>
   );
 }
 
-const fieldBase =
-  'w-full px-3 py-1.5 text-sm border border-slate-300 rounded-md focus:outline-none focus:ring-2 focus:ring-brand/40 focus:border-brand bg-white';
-
 export function Input(props: InputHTMLAttributes<HTMLInputElement>) {
-  return <input {...props} className={classNames(fieldBase, props.className)} />;
+  return <input {...props} className={classNames('input', props.className)} />;
 }
 
 export function Select(props: SelectHTMLAttributes<HTMLSelectElement>) {
-  return <select {...props} className={classNames(fieldBase, props.className)} />;
+  return <select {...props} className={classNames('select', props.className)} />;
 }
 
 export function Textarea(props: TextareaHTMLAttributes<HTMLTextAreaElement>) {
-  return <textarea {...props} className={classNames(fieldBase, props.className)} />;
+  return <textarea {...props} className={classNames('input', props.className)} />;
 }
 
-export function Field({ label, children }: { label: string; children: ReactNode }) {
-  return (
-    <div>
-      <Label>{label}</Label>
-      {children}
-    </div>
-  );
+export function Pill({ children, tone }: { children: ReactNode; tone?: 'terra' | 'sage' | 'plum' | 'rose' | 'amber' }) {
+  return <span className={classNames('pill', tone)}>{children}</span>;
 }
 
-export function EmptyState({ message, action }: { message: string; action?: ReactNode }) {
+export function EmptyState({
+  icon, title, message, action,
+}: { icon?: ReactNode; title?: string; message: string; action?: ReactNode }) {
   return (
-    <div className="text-center py-12 bg-white rounded-lg shadow-sm">
-      <p className="text-slate-500 text-sm">{message}</p>
-      {action && <div className="mt-3">{action}</div>}
+    <div className="empty-state">
+      {icon && <div className="empty-state-icon">{icon}</div>}
+      {title && <h3>{title}</h3>}
+      <p>{message}</p>
+      {action}
     </div>
   );
 }
 
 export function Loader() {
-  return <p className="text-slate-500 text-sm">Chargement…</p>;
+  return <p className="muted small">Chargement…</p>;
 }
 
 export function ErrorBox({ message }: { message: string }) {
-  return <p className="text-rose-600 text-sm">{message}</p>;
+  return <p className="neg small">{message}</p>;
+}
+
+export function Kpi({
+  label, icon, value, sub, subClass, large, tinted,
+}: {
+  label: string;
+  icon?: ReactNode;
+  value: ReactNode;
+  sub?: ReactNode;
+  subClass?: string;
+  large?: boolean;
+  tinted?: boolean;
+}) {
+  return (
+    <div className={classNames('kpi', large && 'large', tinted && 'tinted')}>
+      <div className="kpi-label">{icon}{label}</div>
+      <div className="kpi-value display num">{value}</div>
+      {sub && <div className={classNames('kpi-delta small', subClass)}>{sub}</div>}
+    </div>
+  );
+}
+
+interface ModalProps {
+  open: boolean;
+  onClose: () => void;
+  title: string;
+  children: ReactNode;
+  width?: number;
+}
+
+export function Modal({ open, onClose, title, children, width = 480 }: ModalProps) {
+  if (!open) return null;
+  return (
+    <div
+      onClick={onClose}
+      style={{
+        position: 'fixed', inset: 0, background: 'rgba(28,25,23,0.4)',
+        display: 'flex', alignItems: 'center', justifyContent: 'center',
+        padding: 16, zIndex: 100,
+      }}
+    >
+      <div
+        onClick={(e) => e.stopPropagation()}
+        style={{
+          background: 'var(--bg-elev)', border: '1px solid var(--line)',
+          borderRadius: 'var(--radius-lg)', padding: 24,
+          width: `min(${width}px, 100%)`, maxHeight: '90vh', overflowY: 'auto',
+        }}
+      >
+        <h2 style={{ fontFamily: 'var(--display)', fontSize: 26, margin: '0 0 16px', letterSpacing: '-0.01em' }}>
+          {title}
+        </h2>
+        {children}
+      </div>
+    </div>
+  );
 }

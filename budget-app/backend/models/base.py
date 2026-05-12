@@ -55,8 +55,9 @@ def init_db():
 
     # Importer tous les modèles pour qu'ils soient enregistrés
     from models import (  # noqa: F401
-        User, Account, Income, Charge, RecurringTransfer, OneTimeTransfer,
-        AutoSaving, Purchase, ShoppingItem, Settings, ShoppingCategory,
+        User, Account, AccountMember, Income, Charge, ChargeSplit,
+        RecurringTransfer, OneTimeTransfer, AutoSaving, Purchase,
+        ShoppingItem, Settings, ShoppingCategory,
     )
 
     Base.metadata.create_all(bind=engine)

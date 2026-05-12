@@ -1,70 +1,59 @@
 import { useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import type { LucideIcon } from 'lucide-react';
+import { ChevronLeft, ChevronRight } from 'lucide-react';
 import {
-  ChevronLeft,
-  ChevronRight,
-  CalendarDays,
-  TrendingUp,
-  FileText,
-  ArrowLeftRight,
-  PiggyBank,
-  ShoppingBag,
-} from 'lucide-react';
-import {
-  addMonths,
-  eachDayOfInterval,
-  endOfMonth,
-  endOfWeek,
-  format,
-  isSameDay,
-  isSameMonth,
-  startOfMonth,
-  startOfWeek,
+  addMonths, eachDayOfInterval, endOfMonth, endOfWeek, format,
+  isSameDay, isSameMonth, startOfMonth, startOfWeek,
 } from 'date-fns';
 import { fr } from 'date-fns/locale';
 import { api } from '../lib/api';
+import { eur, num } from '../lib/format';
 import type { CalendarEvent, EventType, UpcomingResponse } from '../types';
+import {
+  Button, Card, ErrorBox, Loader, PageHeader, Pill,
+} from '../components/ui';
 
-const RANGES = [
-  { days: 30, label: '30 j' },
-  { days: 60, label: '60 j' },
-  { days: 90, label: '3 mois' },
-  { days: 180, label: '6 mois' },
-];
-
-const TYPE_META: Record<
-  EventType,
-  { color: string; label: string; icon: LucideIcon }
-> = {
-  income: { color: 'bg-emerald-500', label: 'Revenu', icon: TrendingUp },
-  charge: { color: 'bg-rose-500', label: 'Charge', icon: FileText },
-  transfer_in: { color: 'bg-sky-500', label: 'Virement entrant', icon: ArrowLeftRight },
-  transfer_out: { color: 'bg-sky-700', label: 'Virement sortant', icon: ArrowLeftRight },
-  saving_in: { color: 'bg-violet-500', label: 'Épargne reçue', icon: PiggyBank },
-  saving_out: { color: 'bg-violet-700', label: 'Épargne sortante', icon: PiggyBank },
-  purchase: { color: 'bg-orange-500', label: 'Achat', icon: ShoppingBag },
+const TYPE_DOT: Record<EventType, string> = {
+  income: 'income',
+  charge: 'charge',
+  transfer_in: 'saving',
+  transfer_out: 'saving',
+  saving_in: 'saving',
+  saving_out: 'saving',
+  purchase: 'purchase',
 };
 
-const eur = new Intl.NumberFormat('fr-FR', {
-  style: 'currency',
-  currency: 'EUR',
-});
+const TYPE_LABEL: Record<EventType, string> = {
+  income: 'Revenu',
+  charge: 'Charge',
+  transfer_in: 'Virement reçu',
+  transfer_out: 'Virement envoyé',
+  saving_in: 'Épargne reçue',
+  saving_out: 'Épargne envoyée',
+  purchase: 'Achat',
+};
 
-function fmt(v: string | number): string {
-  return eur.format(typeof v === 'string' ? Number(v) : v);
-}
+const TYPE_TONE: Record<EventType, 'sage' | 'rose' | 'plum' | 'amber'> = {
+  income: 'sage',
+  charge: 'rose',
+  transfer_in: 'plum',
+  transfer_out: 'plum',
+  saving_in: 'plum',
+  saving_out: 'plum',
+  purchase: 'amber',
+};
+
+const DAYS = ['Lun', 'Mar', 'Mer', 'Jeu', 'Ven', 'Sam', 'Dim'];
 
 export function Calendar() {
-  const [days, setDays] = useState(60);
   const [cursor, setCursor] = useState<Date>(() => new Date());
   const [selected, setSelected] = useState<Date>(() => new Date());
 
   const query = useQuery({
-    queryKey: ['calendar', 'upcoming', days],
+    queryKey: ['calendar', 'upcoming', 180],
     queryFn: async () => {
       const { data } = await api.get<UpcomingResponse>('/calendar/upcoming', {
-        params: { days },
+        params: { days: 180 },
       });
       return data;
     },
@@ -90,229 +79,123 @@ export function Calendar() {
   const selectedKey = format(selected, 'yyyy-MM-dd');
   const selectedEvents = byDate.get(selectedKey) ?? [];
 
-  return (
-    <div className="p-6 max-w-7xl mx-auto">
-      <header className="flex items-center justify-between mb-6 flex-wrap gap-3">
-        <div className="flex items-center gap-2">
-          <CalendarDays className="text-brand" />
-          <h2 className="text-2xl font-bold">Calendrier des événements</h2>
-        </div>
-        <div className="flex gap-1 bg-white rounded-lg p-1 shadow-sm">
-          {RANGES.map((r) => (
-            <button
-              key={r.days}
-              onClick={() => setDays(r.days)}
-              className={`px-3 py-1.5 text-sm rounded-md transition ${
-                days === r.days
-                  ? 'bg-brand text-white'
-                  : 'text-slate-600 hover:bg-slate-100'
-              }`}
-            >
-              {r.label}
-            </button>
-          ))}
-        </div>
-      </header>
+  const monthLabel = format(cursor, 'LLLL yyyy', { locale: fr });
 
-      {query.isLoading && <p className="text-slate-500">Chargement…</p>}
-      {query.isError && (
-        <p className="text-rose-600">Erreur de chargement des événements.</p>
-      )}
+  const monthEvents = (query.data?.events ?? []).filter((e) =>
+    isSameMonth(new Date(e.date), cursor),
+  );
+  const totalIn = monthEvents.filter((e) => num(e.amount) > 0).reduce((s, e) => s + num(e.amount), 0);
+  const totalOut = monthEvents.filter((e) => num(e.amount) < 0).reduce((s, e) => s + num(e.amount), 0);
+
+  return (
+    <>
+      <PageHeader
+        eyebrow="Calendrier"
+        title={monthLabel}
+        subtitle={
+          <>
+            <span className="pos">↗ {eur(totalIn)} entrants</span>
+            {' · '}
+            <span className="neg">↘ {eur(Math.abs(totalOut))} sortants</span>
+            {' · '}{monthEvents.length} événements
+          </>
+        }
+      >
+        <Button onClick={() => setCursor(addMonths(cursor, -1))}><ChevronLeft size={14} /></Button>
+        <Button onClick={() => { setCursor(new Date()); setSelected(new Date()); }}>Aujourd'hui</Button>
+        <Button onClick={() => setCursor(addMonths(cursor, 1))}><ChevronRight size={14} /></Button>
+      </PageHeader>
+
+      {query.isLoading && <Loader />}
+      {query.isError && <ErrorBox message="Erreur de chargement des événements." />}
 
       {query.data && (
-        <>
-          <section className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 mb-6">
-            {query.data.accounts.map((a) => {
-              const start = Number(a.starting_balance);
-              const end = Number(a.projected_end_balance);
-              const delta = end - start;
-              return (
-                <div
-                  key={a.account_id}
-                  className="bg-white rounded-lg shadow-sm p-4"
-                >
-                  <p className="text-xs uppercase tracking-wide text-slate-500">
-                    {a.name}
-                  </p>
-                  <p className="text-2xl font-semibold mt-1">{fmt(end)}</p>
-                  <p
-                    className={`text-sm mt-1 ${
-                      delta >= 0 ? 'text-emerald-600' : 'text-rose-600'
-                    }`}
+        <div className="grid" style={{ gridTemplateColumns: '2fr 1fr', gap: 16 }}>
+          <Card>
+            <div className="cal-grid" style={{ marginBottom: 8 }}>
+              {DAYS.map((d) => <div key={d} className="cal-head">{d}</div>)}
+            </div>
+            <div className="cal-grid">
+              {grid.map((d) => {
+                const events = byDate.get(format(d, 'yyyy-MM-dd')) ?? [];
+                const isMuted = !isSameMonth(d, cursor);
+                const isToday = isSameDay(d, today);
+                const isSelected = isSameDay(d, selected);
+                const types = [...new Set(events.map((e) => TYPE_DOT[e.type]))];
+                return (
+                  <button
+                    key={format(d, 'yyyy-MM-dd')}
+                    onClick={() => setSelected(d)}
+                    className={`cal-day ${isMuted ? 'muted' : ''} ${isToday ? 'today' : ''} ${isSelected ? 'selected' : ''}`}
                   >
-                    {delta >= 0 ? '+' : ''}
-                    {fmt(delta)} sur la période
-                  </p>
-                  <p className="text-xs text-slate-400 mt-1">
-                    départ : {fmt(start)}
-                  </p>
-                </div>
-              );
-            })}
-            {query.data.accounts.length === 0 && (
-              <p className="text-sm text-slate-500 col-span-full">
-                Aucun compte actif. Ajoute des comptes pour voir les projections.
-              </p>
+                    <span className="d">{format(d, 'd')}</span>
+                    <div className="dots">
+                      {types.map((t) => <span key={t} className={`dot ${t}`} />)}
+                      {events.length > 0 && <span className="tiny" style={{ marginLeft: 2, opacity: .7 }}>{events.length}</span>}
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
+            <div className="row gap-3" style={{ marginTop: 16, justifyContent: 'center', flexWrap: 'wrap', fontSize: 12, color: 'var(--ink-3)' }}>
+              {(['income', 'charge', 'saving_out', 'purchase'] as EventType[]).map((t) => (
+                <span key={t} className="row gap-2" style={{ alignItems: 'center' }}>
+                  <span className={`dot ${TYPE_DOT[t]}`} /> {TYPE_LABEL[t].split(' ')[0]}
+                </span>
+              ))}
+            </div>
+          </Card>
+
+          <Card>
+            <div className="card-title" style={{ marginBottom: 4 }}>
+              {format(selected, "EEEE d MMMM", { locale: fr })}
+            </div>
+            <div className="small muted" style={{ marginBottom: 14 }}>
+              {selectedEvents.length} événement{selectedEvents.length !== 1 ? 's' : ''}
+            </div>
+            {selectedEvents.length === 0 && (
+              <div className="muted small" style={{ padding: '24px 0', textAlign: 'center' }}>
+                Rien de prévu ce jour-là.
+              </div>
             )}
-          </section>
-
-          <section className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-            <div className="lg:col-span-2 bg-white rounded-lg shadow-sm p-4">
-              <div className="flex items-center justify-between mb-4">
-                <button
-                  onClick={() => setCursor(addMonths(cursor, -1))}
-                  className="p-1 rounded hover:bg-slate-100"
-                  aria-label="Mois précédent"
-                >
-                  <ChevronLeft size={18} />
-                </button>
-                <h3 className="text-lg font-semibold capitalize">
-                  {format(cursor, 'MMMM yyyy', { locale: fr })}
-                </h3>
-                <button
-                  onClick={() => setCursor(addMonths(cursor, 1))}
-                  className="p-1 rounded hover:bg-slate-100"
-                  aria-label="Mois suivant"
-                >
-                  <ChevronRight size={18} />
-                </button>
-              </div>
-
-              <div className="grid grid-cols-7 gap-1 text-center text-xs font-medium text-slate-500 mb-1">
-                {['Lun', 'Mar', 'Mer', 'Jeu', 'Ven', 'Sam', 'Dim'].map((d) => (
-                  <div key={d} className="py-1">
-                    {d}
-                  </div>
-                ))}
-              </div>
-
-              <div className="grid grid-cols-7 gap-1">
-                {grid.map((d) => {
-                  const key = format(d, 'yyyy-MM-dd');
-                  const events = byDate.get(key) ?? [];
-                  const isCur = isSameMonth(d, cursor);
-                  const isToday = isSameDay(d, today);
-                  const isSel = isSameDay(d, selected);
-                  return (
-                    <button
-                      key={key}
-                      onClick={() => setSelected(d)}
-                      className={`aspect-square flex flex-col items-stretch p-1 text-sm rounded relative transition ${
-                        isSel
-                          ? 'bg-brand text-white'
-                          : isToday
-                            ? 'bg-amber-50 ring-1 ring-amber-300'
-                            : 'hover:bg-slate-100'
-                      } ${!isCur ? 'opacity-40' : ''}`}
-                    >
-                      <span
-                        className={`font-medium text-left ${
-                          isSel
-                            ? ''
-                            : isToday
-                              ? 'text-amber-700'
-                              : ''
-                        }`}
-                      >
-                        {format(d, 'd')}
-                      </span>
-                      {events.length > 0 && (
-                        <div className="flex gap-0.5 mt-auto flex-wrap justify-center pb-0.5">
-                          {events.slice(0, 4).map((e, i) => (
-                            <span
-                              key={i}
-                              className={`w-1.5 h-1.5 rounded-full ${TYPE_META[e.type].color}`}
-                              title={`${TYPE_META[e.type].label} — ${e.label}`}
-                            />
-                          ))}
-                          {events.length > 4 && (
-                            <span
-                              className={`text-[10px] leading-none ${
-                                isSel ? 'text-white' : 'text-slate-500'
-                              }`}
-                            >
-                              +{events.length - 4}
-                            </span>
-                          )}
-                        </div>
-                      )}
-                    </button>
-                  );
-                })}
-              </div>
-
-              <div className="mt-4 pt-3 border-t border-slate-100 flex flex-wrap gap-x-4 gap-y-1 text-xs text-slate-600">
-                {(Object.keys(TYPE_META) as EventType[]).map((t) => (
-                  <span key={t} className="inline-flex items-center gap-1.5">
-                    <span
-                      className={`w-2 h-2 rounded-full ${TYPE_META[t].color}`}
-                    />
-                    {TYPE_META[t].label}
+            {selectedEvents.map((e, i) => (
+              <div key={i} style={{ padding: '12px 0', borderBottom: '1px solid var(--line)' }}>
+                <div className="row between">
+                  <Pill tone={TYPE_TONE[e.type]}>{TYPE_LABEL[e.type]}</Pill>
+                  <span className={`num display ${num(e.amount) >= 0 ? 'pos' : ''}`} style={{ fontSize: 18 }}>
+                    {num(e.amount) >= 0 ? '+' : ''}{eur(e.amount)}
                   </span>
-                ))}
+                </div>
+                <div style={{ fontWeight: 500, marginTop: 4 }}>{e.label}</div>
+                <div className="small muted">{e.account_name}</div>
               </div>
-            </div>
-
-            <div className="bg-white rounded-lg shadow-sm p-4">
-              <h3 className="font-semibold capitalize mb-3">
-                {format(selected, 'EEEE d MMMM yyyy', { locale: fr })}
-              </h3>
-              {selectedEvents.length === 0 && (
-                <p className="text-sm text-slate-500">
-                  Aucun événement ce jour-là.
-                </p>
-              )}
-              {selectedEvents.length > 0 && (
-                <ul className="space-y-3">
-                  {selectedEvents.map((e, i) => {
-                    const meta = TYPE_META[e.type];
-                    const Icon = meta.icon;
-                    const amt = Number(e.amount);
-                    return (
-                      <li
-                        key={i}
-                        className="border border-slate-200 rounded-md p-3"
-                      >
-                        <div className="flex items-start gap-2">
-                          <span
-                            className={`p-1.5 rounded-md text-white ${meta.color} flex-shrink-0`}
-                          >
-                            <Icon size={14} />
-                          </span>
-                          <div className="flex-1 min-w-0">
-                            <p className="text-sm font-medium truncate">
-                              {e.label}
-                            </p>
-                            <p className="text-xs text-slate-500 truncate">
-                              {e.account_name}
-                            </p>
-                          </div>
-                          <span
-                            className={`text-sm font-semibold whitespace-nowrap ${
-                              amt >= 0 ? 'text-emerald-600' : 'text-rose-600'
-                            }`}
-                          >
-                            {amt >= 0 ? '+' : ''}
-                            {fmt(amt)}
-                          </span>
-                        </div>
-                        <div className="mt-2 pt-2 border-t border-slate-100 flex items-center justify-between">
-                          <span className="text-xs text-slate-500">
-                            Solde du compte après ce mouvement
-                          </span>
-                          <span className="text-base font-semibold tabular-nums">
-                            {fmt(e.balance_after)}
-                          </span>
-                        </div>
-                      </li>
-                    );
-                  })}
-                </ul>
-              )}
-            </div>
-          </section>
-        </>
+            ))}
+          </Card>
+        </div>
       )}
-    </div>
+
+      {query.data && query.data.accounts.length > 0 && (
+        <div className="grid" style={{
+          gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))',
+          marginTop: 24,
+        }}>
+          {query.data.accounts.map((a) => {
+            const start = num(a.starting_balance);
+            const end = num(a.projected_end_balance);
+            const delta = end - start;
+            return (
+              <Card key={a.account_id}>
+                <p className="eyebrow" style={{ margin: 0 }}>{a.name}</p>
+                <div className="num display" style={{ fontSize: 28 }}>{eur(end)}</div>
+                <div className={`small ${delta >= 0 ? 'pos' : 'neg'}`}>
+                  {delta >= 0 ? '+' : ''}{eur(delta)} sur la période
+                </div>
+                <div className="small muted">Départ : {eur(start)}</div>
+              </Card>
+            );
+          })}
+        </div>
+      )}
+    </>
   );
 }

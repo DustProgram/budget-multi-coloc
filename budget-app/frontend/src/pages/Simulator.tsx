@@ -1,30 +1,35 @@
 import { useState } from 'react';
 import { useMutation, useQuery } from '@tanstack/react-query';
-import { Calculator, Check, X, ThumbsUp, ThumbsDown } from 'lucide-react';
+import { Calculator } from 'lucide-react';
 import { api } from '../lib/api';
 import { eur, num } from '../lib/format';
 import type { Account, SimulationResult } from '../types';
-import { Button, Card, ErrorBox, Field, Input, PageHeader, Select } from '../components/ui';
+import {
+  Button, Card, ErrorBox, Field, Input, PageHeader, Select, Kpi,
+} from '../components/ui';
+
+const QUICKS = [50, 100, 250, 500, 1000];
 
 export function Simulator() {
   const today = new Date();
-  const [amount, setAmount] = useState('100');
+  const [amount, setAmount] = useState('120');
   const [accountId, setAccountId] = useState<number | null>(null);
-  const [year, setYear] = useState(today.getFullYear());
-  const [month, setMonth] = useState(today.getMonth() + 1);
+  const [installments, setInstallments] = useState(1);
+  const [year] = useState(today.getFullYear());
+  const [month] = useState(today.getMonth() + 1);
 
   const accounts = useQuery({
-    queryKey: ['accounts', { includeInactive: false }],
+    queryKey: ['accounts'],
     queryFn: async () => (await api.get<Account[]>('/accounts/')).data,
   });
 
   const sim = useMutation({
     mutationFn: async () => {
+      const monthly = num(amount) / Math.max(1, installments);
       const { data } = await api.post<SimulationResult>('/simulator/', {
-        amount,
+        amount: monthly.toFixed(2),
         account_id: accountId,
-        year,
-        month,
+        year, month,
       });
       return data;
     },
@@ -32,143 +37,107 @@ export function Simulator() {
 
   const result = sim.data;
   const ok = result?.can_afford_global && (accountId === null || result?.can_afford_account);
+  const tight = ok && result && num(result.available_after) < 200;
+  const verdict = !result ? null : !ok ? 'no' : tight ? 'warn' : 'yes';
+  const stamp = !result ? '' : !ok ? 'Non.' : tight ? 'Oui, mais…' : 'Oui.';
+  const msg = !result ? '' : !ok
+    ? `Cet achat ferait passer ta marge à ${eur(result.available_after)}. Mieux vaut attendre.`
+    : tight
+    ? `Ça passe, mais ta marge tomberait à ${eur(result.available_after)} — attention aux extras d'ici fin de mois.`
+    : `Tranquille. Il te resterait ${eur(result.available_after)} de marge après cet achat.`;
 
   return (
-    <div className="p-6 max-w-3xl mx-auto">
-      <PageHeader icon={<Calculator />} title="Est-ce que je peux acheter ?" />
+    <>
+      <PageHeader
+        eyebrow="Simulateur"
+        title="Puis-je acheter ça ?"
+        subtitle="Test instantané sur ta marge réelle, après charges, épargne et achats prévus."
+      />
 
-      <Card className="mb-4">
-        <form
-          onSubmit={(e) => {
-            e.preventDefault();
-            sim.mutate();
-          }}
-          className="grid grid-cols-1 md:grid-cols-2 gap-3"
-        >
-          <Field label="Montant de l'achat envisagé">
-            <Input
-              type="number"
-              step="0.01"
-              required
-              value={amount}
-              onChange={(e) => setAmount(e.target.value)}
-            />
-          </Field>
-          <Field label="Compte (optionnel)">
-            <Select
-              value={accountId ?? ''}
-              onChange={(e) => setAccountId(e.target.value ? Number(e.target.value) : null)}
-            >
-              <option value="">— Vue globale —</option>
-              {accounts.data?.map((a) => (
-                <option key={a.id} value={a.id}>
-                  {a.bank} — {a.name}
-                </option>
+      <div className="grid" style={{ gridTemplateColumns: '1fr 1fr', gap: 16, marginBottom: 24 }}>
+        <Card>
+          <form onSubmit={(e) => { e.preventDefault(); sim.mutate(); }}>
+            <Field label="Montant de l'achat">
+              <Input
+                type="number" step="0.01" required value={amount}
+                onChange={(e) => setAmount(e.target.value)}
+                className="input big"
+              />
+            </Field>
+            <div className="row gap-2" style={{ flexWrap: 'wrap', marginBottom: 12 }}>
+              {QUICKS.map((v) => (
+                <Button key={v} type="button" variant="sm" onClick={() => setAmount(String(v))}>
+                  {v}€
+                </Button>
               ))}
-            </Select>
-          </Field>
-          <Field label="Année">
-            <Input
-              type="number"
-              min={2020}
-              max={2100}
-              value={year}
-              onChange={(e) => setYear(Number(e.target.value))}
-            />
-          </Field>
-          <Field label="Mois">
-            <Input
-              type="number"
-              min={1}
-              max={12}
-              value={month}
-              onChange={(e) => setMonth(Number(e.target.value))}
-            />
-          </Field>
-          <div className="md:col-span-2 flex justify-end pt-2">
-            <Button type="submit" disabled={sim.isPending}>
-              <Calculator size={16} /> Simuler
+            </div>
+            <div className="grid" style={{ gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+              <Field label="Compte">
+                <Select value={accountId ?? ''}
+                  onChange={(e) => setAccountId(e.target.value ? Number(e.target.value) : null)}>
+                  <option value="">Vue globale</option>
+                  {accounts.data?.map((a) => (
+                    <option key={a.id} value={a.id}>{a.name} — {a.bank}</option>
+                  ))}
+                </Select>
+              </Field>
+              <Field label="Étalement">
+                <Select value={installments} onChange={(e) => setInstallments(Number(e.target.value))}>
+                  <option value={1}>Comptant</option>
+                  <option value={2}>2× sans frais</option>
+                  <option value={3}>3× sans frais</option>
+                  <option value={4}>4× sans frais</option>
+                  <option value={10}>10× (crédit)</option>
+                </Select>
+              </Field>
+            </div>
+            <Button type="submit" variant="primary" disabled={sim.isPending} style={{ marginTop: 12 }}>
+              <Calculator size={14} /> Simuler
             </Button>
+            {sim.isError && <ErrorBox message="Erreur lors de la simulation." />}
+          </form>
+        </Card>
+
+        {verdict && (
+          <div className={`sim-verdict ${verdict}`}>
+            <div className="sim-stamp">{stamp}</div>
+            <div className="sim-msg">{msg}</div>
           </div>
-        </form>
-        {sim.isError && <ErrorBox message="Erreur lors de la simulation." />}
-      </Card>
+        )}
+      </div>
 
       {result && (
-        <Card>
-          <div
-            className={`flex items-start gap-3 p-4 rounded-lg ${
-              ok ? 'bg-emerald-50 border border-emerald-200' : 'bg-rose-50 border border-rose-200'
-            }`}
-          >
-            <span
-              className={`p-2 rounded-full ${
-                ok ? 'bg-emerald-500' : 'bg-rose-500'
-              } text-white flex-shrink-0`}
-            >
-              {ok ? <ThumbsUp size={20} /> : <ThumbsDown size={20} />}
-            </span>
-            <div className="flex-1">
-              <p className={`text-lg font-semibold ${ok ? 'text-emerald-700' : 'text-rose-700'}`}>
-                {ok ? 'Oui, tu peux te le permettre.' : 'Attention, ça passe difficilement.'}
-              </p>
-              <p className={`text-sm mt-1 ${ok ? 'text-emerald-600' : 'text-rose-600'}`}>
-                {result.verdict_message}
-              </p>
-            </div>
+        <>
+          <div className="grid" style={{ gridTemplateColumns: 'repeat(4, 1fr)', gap: 16, marginBottom: 24 }}>
+            <Kpi label="Marge avant" value={eur(result.available_before)} />
+            <Kpi label="Impact mensuel"
+              value={`−${eur((num(amount) / installments).toFixed(2))}`}
+              subClass="neg" />
+            <Kpi label="Marge après" value={eur(result.available_after)}
+              subClass={ok ? 'pos' : 'neg'} />
+            <Kpi label="Solde fin de mois" value={eur(result.final_balance_after)} />
           </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mt-4">
-            <Verdict
-              ok={result.can_afford_global}
-              label="Verdict global"
-              detail={`Dispo avant : ${eur(result.available_before)} → après : ${eur(result.available_after)}`}
-            />
-            {accountId !== null && (
-              <Verdict
-                ok={result.can_afford_account}
-                label="Verdict sur le compte"
-                detail={
-                  result.account_balance_after !== null
-                    ? `Solde du compte après : ${eur(result.account_balance_after)}`
-                    : 'Compte non sélectionné'
-                }
-              />
-            )}
-          </div>
-
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mt-4 text-sm">
-            <div className="bg-slate-50 rounded-md p-3">
-              <p className="text-xs uppercase text-slate-500">Avant achat</p>
-              <p className="text-lg font-semibold mt-1 tabular-nums">{eur(result.final_balance_before)}</p>
-            </div>
-            <div className="bg-slate-50 rounded-md p-3">
-              <p className="text-xs uppercase text-slate-500">Après achat</p>
-              <p
-                className={`text-lg font-semibold mt-1 tabular-nums ${
-                  num(result.final_balance_after) >= num(result.final_balance_before)
-                    ? 'text-emerald-600'
-                    : 'text-rose-600'
-                }`}
-              >
-                {eur(result.final_balance_after)}
-              </p>
-            </div>
-          </div>
-        </Card>
+          <Card>
+            <div className="card-title" style={{ marginBottom: 14 }}>Détail du verdict</div>
+            <table className="t">
+              <tbody>
+                <tr><td>Marge actuelle</td><td className="r num">{eur(result.available_before)}</td></tr>
+                <tr><td>Cet achat ({installments}× {eur((num(amount) / installments).toFixed(2))})</td>
+                  <td className="r num neg">−{eur((num(amount) / installments).toFixed(2))}</td></tr>
+                <tr style={{ background: ok ? 'var(--sage-bg)' : 'var(--rose-bg)' }}>
+                  <td><strong>Marge restante</strong></td>
+                  <td className={`r num ${ok ? 'pos' : 'neg'}`}><strong>{eur(result.available_after)}</strong></td>
+                </tr>
+                {result.account_balance_after !== null && (
+                  <tr><td>Solde du compte après</td>
+                    <td className="r num">{eur(result.account_balance_after)}</td></tr>
+                )}
+              </tbody>
+            </table>
+          </Card>
+        </>
       )}
-    </div>
-  );
-}
-
-function Verdict({ ok, label, detail }: { ok: boolean; label: string; detail: string }) {
-  return (
-    <div className={`flex items-center gap-3 p-3 rounded-md ${ok ? 'bg-emerald-50' : 'bg-rose-50'}`}>
-      {ok ? <Check className="text-emerald-600" size={18} /> : <X className="text-rose-600" size={18} />}
-      <div>
-        <p className={`text-sm font-medium ${ok ? 'text-emerald-700' : 'text-rose-700'}`}>{label}</p>
-        <p className="text-xs text-slate-500">{detail}</p>
-      </div>
-    </div>
+    </>
   );
 }

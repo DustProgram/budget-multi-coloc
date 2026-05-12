@@ -1,164 +1,222 @@
 import { useState } from 'react';
-import { useQuery } from '@tanstack/react-query';
-import { Users, Download, ArrowRight } from 'lucide-react';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { Users, Download, ChevronLeft, ChevronRight, Check } from 'lucide-react';
 import { api } from '../lib/api';
 import { eur } from '../lib/format';
-import type { ColocBreakdown } from '../types';
-import { Button, Card, EmptyState, ErrorBox, Field, Input, Loader, PageHeader } from '../components/ui';
+import type { Charge, ColocBreakdown } from '../types';
+import {
+  Button, Card, EmptyState, ErrorBox, Loader, PageHeader, Pill,
+} from '../components/ui';
+import { Avatar } from '../components/Avatar';
+
+const MONTHS = ['Janvier','Février','Mars','Avril','Mai','Juin','Juillet','Août','Septembre','Octobre','Novembre','Décembre'];
 
 export function ColocSummary() {
+  const qc = useQueryClient();
   const today = new Date();
-  const [year, setYear] = useState(today.getFullYear());
-  const [month, setMonth] = useState(today.getMonth() + 1);
+  const [cursor, setCursor] = useState({ year: today.getFullYear(), month: today.getMonth() + 1 });
 
   const breakdown = useQuery({
-    queryKey: ['coloc', 'breakdown', year, month],
-    queryFn: async () => {
-      const { data } = await api.get<ColocBreakdown>('/coloc/breakdown', {
-        params: { year, month },
-      });
-      return data;
-    },
+    queryKey: ['coloc', cursor.year, cursor.month],
+    queryFn: async () => (await api.get<ColocBreakdown>('/coloc/breakdown', { params: cursor })).data,
+  });
+  const charges = useQuery({
+    queryKey: ['charges'],
+    queryFn: async () => (await api.get<Charge[]>('/charges/')).data,
   });
 
-  function downloadPdf(userId: number) {
-    const url = `${api.defaults.baseURL}/coloc/pdf?year=${year}&month=${month}&user_id=${userId}`;
-    window.open(url, '_blank', 'noopener');
+  function shift(delta: number) {
+    const d = new Date(cursor.year, cursor.month - 1 + delta, 1);
+    setCursor({ year: d.getFullYear(), month: d.getMonth() + 1 });
   }
 
+  const data = breakdown.data;
+  const total = data?.summaries.reduce((s, x) => s + x.total_due, 0) ?? 0;
+
   return (
-    <div className="p-6 max-w-5xl mx-auto">
-      <PageHeader icon={<Users />} title="Récap colocation">
-        <div className="flex items-center gap-3">
-          <Field label="Année">
-            <Input
-              type="number"
-              min={2020}
-              max={2100}
-              value={year}
-              onChange={(e) => setYear(Number(e.target.value))}
-              className="w-24"
-            />
-          </Field>
-          <Field label="Mois">
-            <Input
-              type="number"
-              min={1}
-              max={12}
-              value={month}
-              onChange={(e) => setMonth(Number(e.target.value))}
-              className="w-20"
-            />
-          </Field>
-        </div>
+    <>
+      <PageHeader
+        eyebrow={`Coloc · ${MONTHS[cursor.month - 1]} ${cursor.year}`}
+        title="Qui doit quoi à qui."
+        subtitle={data ? `${eur(total)} de charges partagées · ${data.debts.length === 0 ? 'tout est soldé' : `${data.debts.length} virement${data.debts.length > 1 ? 's' : ''} pour solder`}.` : '—'}
+      >
+        <Button onClick={() => shift(-1)}><ChevronLeft size={14} /></Button>
+        <Button variant="primary">{MONTHS[cursor.month - 1]} {cursor.year}</Button>
+        <Button onClick={() => shift(1)}><ChevronRight size={14} /></Button>
       </PageHeader>
 
       {breakdown.isLoading && <Loader />}
       {breakdown.isError && <ErrorBox message="Erreur de chargement." />}
 
-      {breakdown.data && breakdown.data.summaries.length === 0 && (
-        <EmptyState message="Aucune charge partagée pour ce mois." />
+      {data && data.summaries.length === 0 && (
+        <EmptyState
+          icon={<Users size={26} />}
+          title="Pas encore de charges partagées"
+          message="Crée un compte joint, ajoute des membres, puis saisis des charges en mode Égal / Pourcentage / Montant fixe."
+        />
       )}
 
-      {breakdown.data && breakdown.data.summaries.length > 0 && (
-        <>
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
-            {breakdown.data.summaries.map((s) => (
-              <Card key={s.user_id}>
-                <div className="flex items-start justify-between mb-3">
+      {data && data.debts.length > 0 && (
+        <Card style={{ marginBottom: 24 }}>
+          <div className="card-head">
+            <div>
+              <div className="card-title">Flux de remboursement</div>
+              <div className="card-sub">{data.debts.length} virement{data.debts.length > 1 ? 's' : ''} pour solder le mois</div>
+            </div>
+          </div>
+          <div style={{ padding: '24px 0' }}>
+            {data.debts.map((d, i) => (
+              <div key={i} className="flow" style={{ position: 'relative' }}>
+                <div className="row gap-3" style={{ minWidth: 140 }}>
+                  <Avatar user={{ display_name: d.from_user_name }} size={44} />
                   <div>
-                    <h3 className="text-lg font-semibold">{s.user_name}</h3>
-                    <p className="text-sm text-slate-500">
-                      Total dû ce mois :{' '}
-                      <span className="font-semibold text-rose-600">{eur(s.total_due)}</span>
-                    </p>
+                    <div className="display" style={{ fontSize: 20 }}>{d.from_user_name}</div>
+                    <div className="small muted">doit</div>
                   </div>
-                  <Button variant="secondary" onClick={() => downloadPdf(s.user_id)}>
-                    <Download size={14} /> PDF
-                  </Button>
                 </div>
-                <ul className="space-y-1 text-sm">
-                  {s.by_charge.map((c) => (
-                    <li
-                      key={c.charge_id}
-                      className="flex justify-between border-b border-slate-100 last:border-0 pb-1"
-                    >
-                      <div>
-                        <span className="text-slate-700">{c.label}</span>
-                        <span className="text-xs text-slate-400 ml-2">({c.split_mode})</span>
-                      </div>
-                      <span className="tabular-nums">
-                        {c.my_share !== null ? eur(c.my_share) : '—'}
-                      </span>
-                    </li>
-                  ))}
-                </ul>
-              </Card>
+                <div className="flow-arrow">
+                  <span className="flow-amount num">{eur(d.amount)}</span>
+                </div>
+                <div className="row gap-3" style={{ minWidth: 140, justifyContent: 'flex-end' }}>
+                  <div className="right">
+                    <div className="display" style={{ fontSize: 20 }}>{d.to_user_name}</div>
+                    <div className="small muted">reçoit</div>
+                  </div>
+                  <Avatar user={{ display_name: d.to_user_name }} size={44} />
+                </div>
+              </div>
             ))}
           </div>
-
-          {Object.keys(breakdown.data.debts).length > 0 && (
-            <Card>
-              <h3 className="text-lg font-semibold mb-3 flex items-center gap-2">
-                <ArrowRight className="text-brand" size={20} /> Qui doit quoi à qui
-              </h3>
-              <ul className="space-y-2 text-sm">
-                {Object.entries(breakdown.data.debts).flatMap(([fromUser, debts]) =>
-                  Object.entries(debts).map(([toUser, amount]) => (
-                    <li
-                      key={`${fromUser}-${toUser}`}
-                      className="flex items-center justify-between bg-amber-50 border border-amber-200 rounded-md px-3 py-2"
-                    >
-                      <span>
-                        <strong>{nameOf(breakdown.data, Number(fromUser))}</strong> doit à{' '}
-                        <strong>{nameOf(breakdown.data, Number(toUser))}</strong>
-                      </span>
-                      <span className="font-semibold text-amber-700 tabular-nums">{eur(amount)}</span>
-                    </li>
-                  )),
-                )}
-              </ul>
-            </Card>
-          )}
-
-          {breakdown.data.charges_lines.length > 0 && (
-            <Card className="mt-4 p-0 overflow-hidden">
-              <div className="bg-slate-50 px-4 py-2 text-xs uppercase text-slate-500 font-medium">
-                Détail des charges partagées
-              </div>
-              <table className="w-full text-sm">
-                <thead className="text-xs uppercase text-slate-500">
-                  <tr>
-                    <th className="text-left px-4 py-2">Charge</th>
-                    <th className="text-right px-4 py-2">Total</th>
-                    <th className="text-left px-4 py-2">Mode</th>
-                    <th className="text-right px-4 py-2">Par personne</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {breakdown.data.charges_lines.map((l) => (
-                    <tr key={l.charge_id} className="border-t border-slate-100">
-                      <td className="px-4 py-2 font-medium">{l.label}</td>
-                      <td className="px-4 py-2 text-right tabular-nums">{eur(l.total)}</td>
-                      <td className="px-4 py-2 text-slate-600 text-xs">{l.split_mode}</td>
-                      <td className="px-4 py-2 text-right tabular-nums text-xs">
-                        {Object.entries(l.per_person)
-                          .map(([uid, amt]) => `${nameOf(breakdown.data, Number(uid))}: ${eur(amt)}`)
-                          .join(' • ')}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </Card>
-          )}
-        </>
+        </Card>
       )}
-    </div>
+
+      {data && data.summaries.length > 0 && (
+        <div className="grid" style={{
+          gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))',
+          marginBottom: 24,
+        }}>
+          {data.summaries.map((s) => (
+            <Card key={s.user_id}>
+              <div className="row between" style={{ marginBottom: 12 }}>
+                <div className="row gap-3">
+                  <Avatar user={{ display_name: s.user_name }} size={36} />
+                  <div>
+                    <div className="display" style={{ fontSize: 22 }}>{s.user_name}</div>
+                  </div>
+                </div>
+                <Pill tone={s.balance > 0 ? 'sage' : s.balance < 0 ? 'rose' : undefined}>
+                  {s.balance > 0 ? 'Créditeur' : s.balance < 0 ? 'Débiteur' : 'Réglé'}
+                </Pill>
+              </div>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+                <div>
+                  <div className="eyebrow">Dû</div>
+                  <div className="num display" style={{ fontSize: 22 }}>{eur(s.total_due)}</div>
+                </div>
+                <div>
+                  <div className="eyebrow">Payé</div>
+                  <div className="num display" style={{ fontSize: 22 }}>{eur(s.total_paid)}</div>
+                </div>
+              </div>
+              <div className="divider" style={{ margin: '12px 0' }} />
+              <div className="row between">
+                <span className="small muted">Solde</span>
+                <span className={`num display ${s.balance > 0 ? 'pos' : s.balance < 0 ? 'neg' : ''}`} style={{ fontSize: 26 }}>
+                  {s.balance > 0 ? `+${eur(s.balance)}` : eur(s.balance)}
+                </span>
+              </div>
+              <Button
+                style={{ marginTop: 10, width: '100%' }}
+                onClick={async () => {
+                  const url = `${api.defaults.baseURL}/coloc/pdf?year=${cursor.year}&month=${cursor.month}&user_id=${s.user_id}`;
+                  window.open(url, '_blank');
+                }}
+              >
+                <Download size={14} /> Exporter PDF
+              </Button>
+            </Card>
+          ))}
+        </div>
+      )}
+
+      {/* Charges partagées du mois avec settle */}
+      {data && data.charges_lines.length > 0 && (
+        <Card>
+          <div className="card-title" style={{ marginBottom: 14 }}>Charges partagées du mois</div>
+          <table className="t">
+            <thead>
+              <tr>
+                <th>Charge</th>
+                <th>Payeur</th>
+                <th>Mode</th>
+                <th className="r">Total</th>
+                <th className="r">Ma part</th>
+                <th>Splits</th>
+              </tr>
+            </thead>
+            <tbody>
+              {data.charges_lines.map((l) => {
+                const ch = charges.data?.find((c) => c.id === l.charge_id);
+                const payerName = data.summaries.find((s) => s.user_id === l.payer_user_id)?.user_name;
+                return (
+                  <tr key={l.charge_id}>
+                    <td><strong>{l.label}</strong></td>
+                    <td>{payerName ?? '—'}</td>
+                    <td><Pill>{l.split_mode}</Pill></td>
+                    <td className="r num">{eur(l.total)}</td>
+                    <td className="r num">{ch ? eur(ch.my_share) : '—'}</td>
+                    <td>
+                      {ch?.splits.map((sp) => {
+                        const userName = data.summaries.find((u) => u.user_id === sp.user_id)?.user_name;
+                        return (
+                          <SettleBadge key={sp.id}
+                            splitId={sp.id} amount={sp.amount} userName={userName}
+                            settled={!!sp.settled_at}
+                            onChanged={() => {
+                              qc.invalidateQueries({ queryKey: ['coloc'] });
+                              qc.invalidateQueries({ queryKey: ['charges'] });
+                            }}
+                          />
+                        );
+                      })}
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </Card>
+      )}
+    </>
   );
 }
 
-function nameOf(data: ColocBreakdown, userId: number): string {
-  const s = data.summaries.find((x) => x.user_id === userId);
-  return s?.user_name ?? `#${userId}`;
+function SettleBadge({
+  splitId, amount, userName, settled, onChanged,
+}: {
+  splitId: number; amount: string; userName?: string; settled: boolean; onChanged: () => void;
+}) {
+  const m = useMutation({
+    mutationFn: async () => api.post(`/charge-splits/${splitId}/${settled ? 'unsettle' : 'settle'}`),
+    onSuccess: onChanged,
+  });
+  return (
+    <button
+      onClick={() => m.mutate()}
+      style={{
+        display: 'inline-flex', alignItems: 'center', gap: 4,
+        padding: '2px 8px', marginRight: 6, marginBottom: 4,
+        borderRadius: 999,
+        border: '1px solid var(--line)',
+        background: settled ? 'var(--sage-bg)' : 'var(--bg-elev)',
+        color: settled ? 'var(--sage)' : 'var(--ink-2)',
+        fontSize: 11,
+        cursor: 'pointer',
+      }}
+      title={settled ? 'Annuler le settlement' : 'Marquer remboursé'}
+    >
+      {settled && <Check size={10} />}
+      {userName ?? '—'} {eur(amount)}
+    </button>
+  );
 }

@@ -1,7 +1,9 @@
-"""API Charges fixes - CRUD complet (filtré par user_id).
+"""API Charges fixes - CRUD complet.
 
-Le calcul de la part personnelle est délégué à services.budget_calc.compute_my_share.
-Cet endpoint l'expose aussi via le champ `my_share` dans la sortie.
+Filtrage : un user voit les charges qu'il a saisies + les charges portées
+par les comptes joints où il est member.
+Calcul de la part personnelle : déléguée à services.charge_splits.my_share_for_user
+(splits persistés sur comptes joints, fallback compute_my_share sinon).
 """
 from decimal import Decimal
 from typing import Optional
@@ -11,10 +13,18 @@ from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from models.base import get_db
-from models import Charge, Frequency, SplitMode, User
-from services.budget_calc import compute_my_share
+from models import Charge, ChargeSplit, Frequency, SplitMode, User
+from services.access import accessible_account_ids, user_can_write_account
+from services.charge_splits import my_share_for_user, regenerate_splits
 
 router = APIRouter()
+
+
+class SplitOut(BaseModel):
+    id: int
+    user_id: int
+    amount: Decimal
+    settled_at: Optional[str] = None
 
 
 class ChargeCreate(BaseModel):
@@ -62,12 +72,15 @@ class ChargeOut(BaseModel):
     notes: Optional[str]
     is_active: bool
     my_share: Decimal
+    payer_user_id: int
+    splits: list[SplitOut] = []
 
     class Config:
         from_attributes = True
 
 
-def _to_out(charge: Charge) -> ChargeOut:
+def _to_out(db: Session, charge: Charge, user_id: int) -> ChargeOut:
+    splits = db.query(ChargeSplit).filter(ChargeSplit.charge_id == charge.id).all()
     return ChargeOut(
         id=charge.id,
         label=charge.label,
@@ -82,7 +95,16 @@ def _to_out(charge: Charge) -> ChargeOut:
         is_shared=charge.is_shared,
         notes=charge.notes,
         is_active=charge.is_active,
-        my_share=compute_my_share(charge),
+        my_share=my_share_for_user(db, charge, user_id),
+        payer_user_id=charge.user_id,
+        splits=[
+            SplitOut(
+                id=s.id, user_id=s.user_id,
+                amount=Decimal(s.amount or 0),
+                settled_at=s.settled_at.isoformat() if s.settled_at else None,
+            )
+            for s in splits
+        ],
     )
 
 
@@ -92,11 +114,15 @@ async def list_charges(
     db: Session = Depends(get_db),
     include_inactive: bool = False,
 ):
+    """Charges saisies par l'user OU sur un compte qu'il peut voir."""
     user: User = request.state.user
-    q = db.query(Charge).filter(Charge.user_id == user.id)
+    acc_ids = accessible_account_ids(db, user.id)
+    q = db.query(Charge).filter(
+        (Charge.user_id == user.id) | (Charge.account_id.in_(acc_ids))
+    )
     if not include_inactive:
         q = q.filter(Charge.is_active.is_(True))
-    return [_to_out(c) for c in q.order_by(Charge.day_of_month).all()]
+    return [_to_out(db, c, user.id) for c in q.order_by(Charge.day_of_month).all()]
 
 
 @router.post("/", response_model=ChargeOut, status_code=201)
@@ -105,12 +131,19 @@ async def create_charge(
     payload: ChargeCreate,
     db: Session = Depends(get_db),
 ):
+    """Crée une charge et génère automatiquement les ChargeSplit si le compte
+    porteur est un compte joint et le mode est partagé."""
     user: User = request.state.user
+    if payload.account_id and not user_can_write_account(db, user.id, payload.account_id):
+        raise HTTPException(403, "Pas le droit d'écrire sur ce compte")
+
     ch = Charge(**payload.model_dump(), user_id=user.id)
     db.add(ch)
+    db.flush()
+    regenerate_splits(db, ch)
     db.commit()
     db.refresh(ch)
-    return _to_out(ch)
+    return _to_out(db, ch, user.id)
 
 
 @router.patch("/{charge_id}", response_model=ChargeOut)
@@ -121,16 +154,20 @@ async def update_charge(
     db: Session = Depends(get_db),
 ):
     user: User = request.state.user
-    ch = db.query(Charge).filter(
-        Charge.id == charge_id, Charge.user_id == user.id,
-    ).first()
+    ch = db.query(Charge).filter(Charge.id == charge_id).first()
     if not ch:
         raise HTTPException(404, "Charge introuvable")
+    # Seul le créateur de la charge (payeur) peut la modifier
+    if ch.user_id != user.id:
+        raise HTTPException(403, "Modification réservée au créateur de la charge")
+
     for k, v in payload.model_dump(exclude_unset=True).items():
         setattr(ch, k, v)
+    db.flush()
+    regenerate_splits(db, ch)
     db.commit()
     db.refresh(ch)
-    return _to_out(ch)
+    return _to_out(db, ch, user.id)
 
 
 @router.delete("/{charge_id}", status_code=204)

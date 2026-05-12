@@ -98,6 +98,13 @@ export type Frequency = (typeof FREQUENCIES)[number];
 export const SPLIT_MODES = ['Perso', 'Égal', 'Pourcentage', 'Montant fixe'] as const;
 export type SplitMode = (typeof SPLIT_MODES)[number];
 
+export interface ChargeSplit {
+  id: number;
+  user_id: number;
+  amount: string;
+  settled_at: string | null;
+}
+
 export interface Charge {
   id: number;
   label: string;
@@ -113,6 +120,8 @@ export interface Charge {
   notes: string | null;
   is_active: boolean;
   my_share: string;
+  payer_user_id: number;
+  splits: ChargeSplit[];
 }
 
 export interface RecurringTransfer {
@@ -226,22 +235,51 @@ export interface ColocSummaryEntry {
   month: number;
   user_id: number;
   user_name: string;
-  total_due: string;
+  total_due: number;
+  total_paid: number;
+  balance: number;
   by_charge: ColocChargeLine[];
-  owes_to: Record<string, string>;
+}
+
+export interface ColocDebt {
+  from_user_id: number;
+  from_user_name: string;
+  to_user_id: number;
+  to_user_name: string;
+  amount: number;
 }
 
 export interface ColocBreakdown {
   charges_lines: Array<{
     charge_id: number;
     label: string;
-    total: string;
-    per_person: Record<string, string>;
+    total: number;
+    per_person: Record<string, number>;
     split_mode: string;
     payer_user_id: number;
   }>;
   summaries: ColocSummaryEntry[];
-  debts: Record<string, Record<string, string>>;
+  debts: ColocDebt[];
+}
+
+// ============================================================
+// Membres de compte joint
+// ============================================================
+
+export interface AccountMember {
+  user_id: number;
+  ha_username: string;
+  display_name: string | null;
+  color_hex: string;
+  role: 'owner' | 'cotitulaire' | 'viewer';
+  joined_at: string | null;
+}
+
+export interface UserPickerEntry {
+  user_id: number;
+  ha_username: string;
+  display_name: string | null;
+  color_hex: string;
 }
 
 // ============================================================
