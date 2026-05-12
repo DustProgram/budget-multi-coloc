@@ -580,22 +580,70 @@ input, select, textarea { font-family: inherit; font-size: inherit; color: inher
   from { opacity: 0; transform: translateY(8px); }
   to { opacity: 1; transform: translateY(0); }
 }
+@keyframes fadeUpRich {
+  from { opacity: 0; transform: translateY(14px) scale(.98); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+@keyframes pop {
+  0% { transform: scale(.94); }
+  60% { transform: scale(1.02); }
+  100% { transform: scale(1); }
+}
+
+/* Subtle (par défaut) : fades + hovers léger */
+[data-anim="subtle"] .main,
 [data-anim="on"] .main {
   animation: fadeUp .32s cubic-bezier(.2,.7,.3,1) both;
 }
+[data-anim="subtle"] .card,
+[data-anim="subtle"] .kpi,
 [data-anim="on"] .card,
 [data-anim="on"] .kpi {
   transition: transform .2s ease, box-shadow .2s ease, border-color .2s ease;
 }
+[data-anim="subtle"] .nav-item,
+[data-anim="subtle"] .btn,
+[data-anim="subtle"] .pill,
 [data-anim="on"] .nav-item,
 [data-anim="on"] .btn,
 [data-anim="on"] .pill {
   transition: background .18s ease, color .18s ease, border-color .18s ease, transform .12s ease;
 }
+[data-anim="subtle"] .btn:active,
 [data-anim="on"] .btn:active { transform: scale(.97); }
+[data-anim="subtle"] .sim-stamp,
 [data-anim="on"] .sim-stamp {
   animation: fadeUp .5s cubic-bezier(.2,.7,.3,1) both;
 }
+
+/* Rich : transitions plus marquées, lift au hover, pop sur les checkbox */
+[data-anim="rich"] .main { animation: fadeUpRich .42s cubic-bezier(.2,.7,.3,1) both; }
+[data-anim="rich"] .card,
+[data-anim="rich"] .kpi {
+  transition: transform .25s cubic-bezier(.2,.7,.3,1), box-shadow .25s ease, border-color .25s ease;
+}
+[data-anim="rich"] .card:hover,
+[data-anim="rich"] .kpi:hover {
+  transform: translateY(-2px);
+  box-shadow: var(--shadow);
+}
+[data-anim="rich"] .nav-item,
+[data-anim="rich"] .btn,
+[data-anim="rich"] .pill {
+  transition: background .22s cubic-bezier(.2,.7,.3,1),
+              color .22s ease, border-color .22s ease,
+              transform .15s cubic-bezier(.2,.7,.3,1);
+}
+[data-anim="rich"] .btn:hover { transform: translateY(-1px); }
+[data-anim="rich"] .btn:active { transform: scale(.95); }
+[data-anim="rich"] .nav-item:hover { transform: translateX(2px); }
+[data-anim="rich"] .sim-stamp { animation: fadeUpRich .55s cubic-bezier(.2,.7,.3,1) both; }
+[data-anim="rich"] .checkbox.checked { animation: pop .25s ease both; }
+
+/* None : tout coupé */
+[data-anim="none"] *,
+[data-anim="none"] *::before,
+[data-anim="none"] *::after,
 [data-anim="off"] *,
 [data-anim="off"] *::before,
 [data-anim="off"] *::after {

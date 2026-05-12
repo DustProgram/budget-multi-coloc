@@ -18,6 +18,7 @@ from api import (
     accounts, account_members, incomes, charges, charge_splits,
     transfers, savings, purchases, shopping, coloc, simulator, dashboard,
     health, notifier as notifier_api, users as users_api,
+    custom_events, messages as messages_api,
     calendar as calendar_api,
 )
 from models.base import init_db
@@ -97,6 +98,8 @@ app.include_router(dashboard.router, prefix="/api/dashboard", tags=["dashboard"]
 app.include_router(calendar_api.router, prefix="/api/calendar", tags=["calendar"])
 app.include_router(notifier_api.router, prefix="/api/notifier", tags=["notifier"])
 app.include_router(users_api.router, prefix="/api/users", tags=["users"])
+app.include_router(custom_events.router, prefix="/api/custom-events", tags=["custom-events"])
+app.include_router(messages_api.router, prefix="/api/accounts", tags=["messages"])
 
 # ===== Frontend statique (PWA) =====
 static_dir = Path(os.environ.get("STATIC_DIR", "/app/static"))

@@ -77,6 +77,14 @@ class AccountMemberRole(str, Enum):
     VIEWER = "viewer"
 
 
+class CustomEventKind(str, Enum):
+    PERSO = "perso"          # rappel personnel (médecin, rendez-vous)
+    COLOC = "coloc"          # événement partagé (apéro, ménage)
+    FAMILLE = "famille"
+    PRO = "pro"              # rendez-vous client, deadline facture
+    AUTRE = "autre"
+
+
 # ============================================================
 # Utilisateurs (synchros avec HA via Ingress)
 # ============================================================
@@ -97,6 +105,9 @@ class User(Base):
     # Token opt-in pour accès au port externe 8765, sous la responsabilité du user.
     # Quand présent, autorise l'accès complet à l'app via ?token=… ou Bearer.
     external_token = Column(String(64), unique=True, nullable=True, index=True)
+    # Quand True, l'UI affiche le switcher Perso/Pro et la rubrique Compta-pro.
+    # Utilisable pour micro-entrepreneur / freelance qui veut un suivi séparé.
+    pro_enabled = Column(Boolean, default=False)
 
 
 # ============================================================
@@ -115,6 +126,9 @@ class Account(Base):
     notes = Column(Text, nullable=True)
     is_active = Column(Boolean, default=True)
     created_at = Column(DateTime, default=datetime.utcnow)
+    # 'perso' (par défaut) ou 'pro' pour les comptes liés à l'activité professionnelle.
+    # L'UI filtre via le switcher Perso/Pro quand pro_enabled est activé sur l'user.
+    space = Column(String(8), default="perso", nullable=False, index=True)
 
     user = relationship("User", backref="accounts")
     members = relationship("AccountMember", back_populates="account", cascade="all, delete-orphan")
@@ -353,3 +367,58 @@ class ShoppingCategory(Base):
     label = Column(String(64), nullable=False, unique=True)
     icon = Column(String(64), nullable=True)  # nom Material Icon
     order = Column(Integer, default=0)
+
+
+# ============================================================
+# Événements custom dans le planning (rappels, RDV, apéros…)
+# ============================================================
+
+class CustomEvent(Base):
+    """Événement non-bancaire affiché dans le calendrier.
+
+    Si is_shared = True et account_id pointe sur un compte joint, tous les
+    membres du compte voient l'événement. Sinon l'événement est strictement
+    perso (visible par l'user créateur uniquement).
+    """
+    __tablename__ = "custom_events"
+
+    id = Column(Integer, primary_key=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    date = Column(Date, nullable=False, index=True)
+    label = Column(String(128), nullable=False)
+    kind = Column(SQLEnum(CustomEventKind), default=CustomEventKind.PERSO)
+    description = Column(Text, nullable=True)
+    is_shared = Column(Boolean, default=False)
+    account_id = Column(Integer, ForeignKey("accounts.id"), nullable=True)  # pour partage via compte joint
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    user = relationship("User")
+    account = relationship("Account")
+
+
+# ============================================================
+# Messagerie inter-user sur compte joint
+# ============================================================
+
+class Message(Base):
+    """Message posté sur un compte joint, visible à tous ses membres."""
+    __tablename__ = "messages"
+
+    id = Column(Integer, primary_key=True)
+    account_id = Column(Integer, ForeignKey("accounts.id", ondelete="CASCADE"), nullable=False, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    body = Column(Text, nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow, index=True)
+
+    user = relationship("User")
+    account = relationship("Account")
+
+
+class MessageRead(Base):
+    """Pointeur du dernier message lu par chaque user sur chaque compte.
+    Permet de calculer le compteur 'non lus' sans table de read-receipts par message."""
+    __tablename__ = "message_reads"
+
+    user_id = Column(Integer, ForeignKey("users.id"), primary_key=True)
+    account_id = Column(Integer, ForeignKey("accounts.id", ondelete="CASCADE"), primary_key=True)
+    last_read_at = Column(DateTime, default=datetime.utcnow)

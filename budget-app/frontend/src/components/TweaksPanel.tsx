@@ -4,19 +4,20 @@ import { Sliders, X } from 'lucide-react';
 type Theme = 'doux' | 'night' | 'sobre';
 type Font = 'serif' | 'sans';
 type Accent = 'terra' | 'sage' | 'plum' | 'amber';
+type AnimLevel = 'none' | 'subtle' | 'rich';
 
 interface Tweaks {
   theme: Theme;
   font: Font;
   accent: Accent;
-  animations: boolean;
+  animations: AnimLevel;
 }
 
 const DEFAULTS: Tweaks = {
   theme: 'doux',
   font: 'serif',
   accent: 'terra',
-  animations: true,
+  animations: 'subtle',
 };
 const STORAGE_KEY = 'budget-tweaks';
 
@@ -37,7 +38,12 @@ function load(): Tweaks {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (!raw) return DEFAULTS;
-    return { ...DEFAULTS, ...JSON.parse(raw) };
+    const parsed = JSON.parse(raw);
+    // Migration : ancienne valeur booléenne → AnimLevel
+    if (typeof parsed.animations === 'boolean') {
+      parsed.animations = parsed.animations ? 'subtle' : 'none';
+    }
+    return { ...DEFAULTS, ...parsed };
   } catch {
     return DEFAULTS;
   }
@@ -47,11 +53,10 @@ function apply(t: Tweaks) {
   const root = document.documentElement;
   if (t.theme === 'doux') root.removeAttribute('data-theme');
   else root.setAttribute('data-theme', t.theme);
-  root.setAttribute('data-anim', t.animations ? 'on' : 'off');
+  root.setAttribute('data-anim', t.animations);
   root.style.setProperty('--display', FONT_DISPLAY[t.font]);
   const c = ACCENT_COLORS[t.accent];
   root.style.setProperty('--accent', c.accent);
-  // accent-bg is theme-aware in the base CSS; we only override for "doux" (default)
   if (t.theme === 'doux') {
     root.style.setProperty('--accent-bg', c.bg);
   } else {
@@ -184,21 +189,22 @@ export function TweaksPanel() {
 
             <section>
               <div className="eyebrow" style={{ marginBottom: 10 }}>Animations</div>
-              <label className="row between" style={{
-                padding: '12px 14px', borderRadius: 12,
-                background: 'var(--bg-sunken)', cursor: 'pointer',
-              }}>
-                <div>
-                  <div style={{ fontWeight: 500 }}>Transitions opt-in</div>
-                  <div className="small muted">Fades, hovers, micro-anims</div>
-                </div>
-                <input
-                  type="checkbox"
-                  checked={tweaks.animations}
-                  onChange={(e) => setTweaks({ ...tweaks, animations: e.target.checked })}
-                  style={{ width: 20, height: 20 }}
-                />
-              </label>
+              <div className="grid" style={{ gridTemplateColumns: 'repeat(3, 1fr)', gap: 8 }}>
+                {([
+                  { id: 'none' as const, label: 'Aucune', desc: 'Statique' },
+                  { id: 'subtle' as const, label: 'Légères', desc: 'Hovers, fades' },
+                  { id: 'rich' as const, label: 'Riches', desc: 'Tout transitionne' },
+                ]).map((opt) => (
+                  <Tile
+                    key={opt.id}
+                    selected={tweaks.animations === opt.id}
+                    onClick={() => setTweaks({ ...tweaks, animations: opt.id })}
+                    label={opt.label}
+                  >
+                    <span className="small muted" style={{ fontSize: 11 }}>{opt.desc}</span>
+                  </Tile>
+                ))}
+              </div>
             </section>
 
             <div className="small muted" style={{ marginTop: 'auto' }}>

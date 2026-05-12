@@ -15,6 +15,8 @@ import { Shopping } from './pages/Shopping';
 import { ColocSummary } from './pages/ColocSummary';
 import { Calendar } from './pages/Calendar';
 import { Settings } from './pages/Settings';
+import { ComptaPro } from './pages/ComptaPro';
+import { SpaceProvider } from './lib/space';
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -33,27 +35,30 @@ export default function App() {
 
   return (
     <QueryClientProvider client={queryClient}>
-      <BrowserRouter basename={basename}>
-        <Routes>
-          <Route element={<Layout />}>
-            <Route index element={<Navigate to="/dashboard" replace />} />
-            <Route path="dashboard" element={<Dashboard />} />
-            <Route path="calendar" element={<Calendar />} />
-            <Route path="accounts" element={<Accounts />} />
-            <Route path="incomes" element={<Incomes />} />
-            <Route path="charges" element={<Charges />} />
-            <Route path="transfers" element={<Transfers />} />
-            <Route path="savings" element={<Savings />} />
-            <Route path="purchases" element={<Purchases />} />
-            <Route path="simulator" element={<Simulator />} />
-            <Route path="monthly" element={<MonthlyView />} />
-            <Route path="yearly" element={<YearlyView />} />
-            <Route path="shopping" element={<Shopping />} />
-            <Route path="coloc" element={<ColocSummary />} />
-            <Route path="settings" element={<Settings />} />
-          </Route>
-        </Routes>
-      </BrowserRouter>
+      <SpaceProvider>
+        <BrowserRouter basename={basename}>
+          <Routes>
+            <Route element={<Layout />}>
+              <Route index element={<Navigate to="/dashboard" replace />} />
+              <Route path="dashboard" element={<Dashboard />} />
+              <Route path="calendar" element={<Calendar />} />
+              <Route path="accounts" element={<Accounts />} />
+              <Route path="incomes" element={<Incomes />} />
+              <Route path="charges" element={<Charges />} />
+              <Route path="transfers" element={<Transfers />} />
+              <Route path="savings" element={<Savings />} />
+              <Route path="purchases" element={<Purchases />} />
+              <Route path="simulator" element={<Simulator />} />
+              <Route path="monthly" element={<MonthlyView />} />
+              <Route path="yearly" element={<YearlyView />} />
+              <Route path="shopping" element={<Shopping />} />
+              <Route path="coloc" element={<ColocSummary />} />
+              <Route path="compta-pro" element={<ComptaPro />} />
+              <Route path="settings" element={<Settings />} />
+            </Route>
+          </Routes>
+        </BrowserRouter>
+      </SpaceProvider>
     </QueryClientProvider>
   );
 }

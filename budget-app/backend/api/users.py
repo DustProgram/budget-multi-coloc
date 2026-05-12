@@ -19,6 +19,11 @@ class MeOut(BaseModel):
     color_hex: str
     is_admin: bool
     has_external_token: bool
+    pro_enabled: bool
+
+
+class ProToggle(BaseModel):
+    enabled: bool
 
 
 class TokenOut(BaseModel):
@@ -40,6 +45,35 @@ async def get_me(request: Request):
         color_hex=user.color_hex,
         is_admin=user.is_admin,
         has_external_token=user.external_token is not None,
+        pro_enabled=bool(user.pro_enabled),
+    )
+
+
+@router.post("/me/pro-enabled", response_model=MeOut)
+async def set_pro_enabled(
+    payload: ProToggle,
+    request: Request,
+    db: Session = Depends(get_db),
+):
+    """Active ou désactive le mode professionnel (auto-entrepreneur).
+
+    Quand actif, l'UI affiche le switcher Perso/Pro dans la sidebar et la
+    rubrique Compta-pro devient accessible. Les données existantes ne sont
+    pas affectées — seul l'affichage change.
+    """
+    user_id = request.state.user.id
+    user = db.get(User, user_id)
+    user.pro_enabled = payload.enabled
+    db.commit()
+    db.refresh(user)
+    return MeOut(
+        user_id=user.id,
+        ha_username=user.ha_username,
+        display_name=user.display_name,
+        color_hex=user.color_hex,
+        is_admin=user.is_admin,
+        has_external_token=user.external_token is not None,
+        pro_enabled=bool(user.pro_enabled),
     )
 
 

@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   KeyRound, Copy, Check, RefreshCw, Trash2,
-  AlertTriangle, Bell, BellRing,
+  AlertTriangle, Bell, BellRing, Briefcase,
 } from 'lucide-react';
 import { api } from '../lib/api';
 import {
@@ -16,6 +16,7 @@ interface Me {
   color_hex: string;
   is_admin: boolean;
   has_external_token: boolean;
+  pro_enabled: boolean;
 }
 
 interface NotifierStatus {
@@ -57,6 +58,12 @@ export function Settings() {
       title: 'Budget — test',
       message: 'Notif test envoyée depuis l\'add-on Budget.',
     }),
+  });
+
+  const togglePro = useMutation({
+    mutationFn: async (enabled: boolean) =>
+      (await api.post('/users/me/pro-enabled', { enabled })).data,
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['me'] }),
   });
 
   const externalUrl = freshToken
@@ -184,6 +191,39 @@ export function Settings() {
                 </Button>
               )}
             </div>
+          </Card>
+
+          <Card>
+            <div className="row gap-2" style={{ alignItems: 'center', marginBottom: 4 }}>
+              <Briefcase size={16} style={{ color: 'var(--ink-2)' }} />
+              <p className="eyebrow" style={{ margin: 0 }}>Mode professionnel</p>
+            </div>
+            <h3 style={{ fontFamily: 'var(--display)', fontSize: 22, margin: '4px 0 8px' }}>
+              Auto-entrepreneur · suivi séparé
+            </h3>
+            <p className="small muted">
+              Active ce mode si tu factures en parallèle de tes revenus salariés.
+              Un switcher Perso/Pro apparaîtra dans la sidebar, et la rubrique
+              Compta-pro (CA, provision URSSAF, seuil TVA) sera visible.
+              Les comptes que tu marques "pro" sont isolés des soldes perso.
+            </p>
+            <label className="row between" style={{
+              padding: '12px 14px', borderRadius: 12,
+              background: 'var(--bg-sunken)', cursor: 'pointer', marginTop: 14,
+            }}>
+              <div>
+                <div style={{ fontWeight: 500 }}>Activer le mode pro</div>
+                <div className="small muted">
+                  {me.data.pro_enabled ? 'Actuellement activé.' : 'Désactivé par défaut.'}
+                </div>
+              </div>
+              <input
+                type="checkbox"
+                checked={me.data.pro_enabled}
+                onChange={(e) => togglePro.mutate(e.target.checked)}
+                style={{ width: 20, height: 20 }}
+              />
+            </label>
           </Card>
 
           <Card>

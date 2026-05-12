@@ -20,6 +20,7 @@ class AccountCreate(BaseModel):
     initial_balance: Decimal = Decimal(0)
     notes: Optional[str] = None
     is_active: bool = True
+    space: str = "perso"  # 'perso' (par défaut) ou 'pro'
 
 
 class AccountUpdate(BaseModel):
@@ -29,6 +30,7 @@ class AccountUpdate(BaseModel):
     initial_balance: Optional[Decimal] = None
     notes: Optional[str] = None
     is_active: Optional[bool] = None
+    space: Optional[str] = None
 
 
 class AccountOut(BaseModel):
@@ -40,6 +42,7 @@ class AccountOut(BaseModel):
     notes: Optional[str]
     is_active: bool
     created_at: datetime
+    space: str
 
     class Config:
         from_attributes = True
@@ -50,11 +53,15 @@ async def list_accounts(
     request: Request,
     db: Session = Depends(get_db),
     include_inactive: bool = False,
+    space: Optional[str] = None,
 ):
+    """Comptes de l'user. ?space=perso|pro pour filtrer (sinon tout)."""
     user: User = request.state.user
     q = db.query(Account).filter(Account.user_id == user.id)
     if not include_inactive:
         q = q.filter(Account.is_active.is_(True))
+    if space in ("perso", "pro"):
+        q = q.filter(Account.space == space)
     return q.order_by(Account.bank, Account.name).all()
 
 

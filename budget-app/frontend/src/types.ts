@@ -61,6 +61,8 @@ export const ACCOUNT_TYPES = [
 ] as const;
 export type AccountType = (typeof ACCOUNT_TYPES)[number];
 
+export type Space = 'perso' | 'pro';
+
 export interface Account {
   id: number;
   bank: string;
@@ -70,6 +72,7 @@ export interface Account {
   notes: string | null;
   is_active: boolean;
   created_at: string;
+  space: Space;
 }
 
 export const INCOME_TYPES = ['Régulier', 'Ponctuel', 'Variable'] as const;
@@ -280,6 +283,42 @@ export interface UserPickerEntry {
   ha_username: string;
   display_name: string | null;
   color_hex: string;
+}
+
+// ============================================================
+// Custom events & messagerie
+// ============================================================
+
+export type CustomEventKind = 'perso' | 'coloc' | 'famille' | 'pro' | 'autre';
+
+export interface CustomEvent {
+  id: number;
+  user_id: number;
+  user_name: string | null;
+  date: string;             // ISO yyyy-MM-dd
+  label: string;
+  kind: CustomEventKind;
+  description: string | null;
+  is_shared: boolean;
+  account_id: number | null;
+}
+
+export interface Message {
+  id: number;
+  user_id: number;
+  user_name: string | null;
+  body: string;
+  created_at: string;
+}
+
+export interface Me {
+  user_id: number;
+  ha_username: string;
+  display_name: string | null;
+  color_hex: string;
+  is_admin: boolean;
+  has_external_token: boolean;
+  pro_enabled: boolean;
 }
 
 // ============================================================

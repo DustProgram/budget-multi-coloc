@@ -58,6 +58,7 @@ def init_db():
         User, Account, AccountMember, Income, Charge, ChargeSplit,
         RecurringTransfer, OneTimeTransfer, AutoSaving, Purchase,
         ShoppingItem, Settings, ShoppingCategory,
+        CustomEvent, Message, MessageRead,
     )
 
     Base.metadata.create_all(bind=engine)
@@ -66,6 +67,9 @@ def init_db():
     # ancienne version d'init_db. create_all ne fait pas d'ALTER TABLE.
     _migrate_add_column_if_missing("users", "external_token", "TEXT")
     _create_index_if_missing("ix_users_external_token", "users", "external_token", unique=True)
+    _migrate_add_column_if_missing("users", "pro_enabled", "BOOLEAN DEFAULT 0")
+    _migrate_add_column_if_missing("accounts", "space", "VARCHAR(8) DEFAULT 'perso' NOT NULL")
+    _create_index_if_missing("ix_accounts_space", "accounts", "space")
 
     # Créer les paramètres par défaut si table vide
     db = SessionLocal()

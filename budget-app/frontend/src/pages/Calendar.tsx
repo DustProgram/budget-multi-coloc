@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react';
-import { useQuery } from '@tanstack/react-query';
-import { ChevronLeft, ChevronRight } from 'lucide-react';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { ChevronLeft, ChevronRight, Plus, Trash2, Users as UsersIcon } from 'lucide-react';
 import {
   addMonths, eachDayOfInterval, endOfMonth, endOfWeek, format,
   isSameDay, isSameMonth, startOfMonth, startOfWeek,
@@ -8,9 +8,13 @@ import {
 import { fr } from 'date-fns/locale';
 import { api } from '../lib/api';
 import { eur, num } from '../lib/format';
-import type { CalendarEvent, EventType, UpcomingResponse } from '../types';
+import type {
+  Account, CalendarEvent, CustomEvent, CustomEventKind, EventType,
+  UpcomingResponse,
+} from '../types';
 import {
-  Button, Card, ErrorBox, Loader, PageHeader, Pill,
+  Button, Card, ErrorBox, Field, Input, Loader, Modal,
+  PageHeader, Pill, Select, Textarea,
 } from '../components/ui';
 
 const TYPE_DOT: Record<EventType, string> = {
@@ -46,8 +50,10 @@ const TYPE_TONE: Record<EventType, 'sage' | 'rose' | 'plum' | 'amber'> = {
 const DAYS = ['Lun', 'Mar', 'Mer', 'Jeu', 'Ven', 'Sam', 'Dim'];
 
 export function Calendar() {
+  const qc = useQueryClient();
   const [cursor, setCursor] = useState<Date>(() => new Date());
   const [selected, setSelected] = useState<Date>(() => new Date());
+  const [creating, setCreating] = useState(false);
 
   const query = useQuery({
     queryKey: ['calendar', 'upcoming', 180],
@@ -57,6 +63,21 @@ export function Calendar() {
       });
       return data;
     },
+  });
+
+  const custom = useQuery({
+    queryKey: ['custom-events'],
+    queryFn: async () => (await api.get<CustomEvent[]>('/custom-events/')).data,
+  });
+
+  const accounts = useQuery({
+    queryKey: ['accounts'],
+    queryFn: async () => (await api.get<Account[]>('/accounts/')).data,
+  });
+
+  const deleteEvent = useMutation({
+    mutationFn: async (id: number) => api.delete(`/custom-events/${id}`),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['custom-events'] }),
   });
 
   const byDate = useMemo(() => {
@@ -69,6 +90,16 @@ export function Calendar() {
     return map;
   }, [query.data]);
 
+  const customByDate = useMemo(() => {
+    const map = new Map<string, CustomEvent[]>();
+    for (const ev of custom.data ?? []) {
+      const list = map.get(ev.date) ?? [];
+      list.push(ev);
+      map.set(ev.date, list);
+    }
+    return map;
+  }, [custom.data]);
+
   const monthStart = startOfMonth(cursor);
   const monthEnd = endOfMonth(cursor);
   const gridStart = startOfWeek(monthStart, { weekStartsOn: 1 });
@@ -78,6 +109,7 @@ export function Calendar() {
 
   const selectedKey = format(selected, 'yyyy-MM-dd');
   const selectedEvents = byDate.get(selectedKey) ?? [];
+  const selectedCustom = customByDate.get(selectedKey) ?? [];
 
   const monthLabel = format(cursor, 'LLLL yyyy', { locale: fr });
 
@@ -104,6 +136,9 @@ export function Calendar() {
         <Button onClick={() => setCursor(addMonths(cursor, -1))}><ChevronLeft size={14} /></Button>
         <Button onClick={() => { setCursor(new Date()); setSelected(new Date()); }}>Aujourd'hui</Button>
         <Button onClick={() => setCursor(addMonths(cursor, 1))}><ChevronRight size={14} /></Button>
+        <Button variant="primary" onClick={() => setCreating(true)}>
+          <Plus size={14} /> Événement
+        </Button>
       </PageHeader>
 
       {query.isLoading && <Loader />}
@@ -117,11 +152,14 @@ export function Calendar() {
             </div>
             <div className="cal-grid">
               {grid.map((d) => {
-                const events = byDate.get(format(d, 'yyyy-MM-dd')) ?? [];
+                const dKey = format(d, 'yyyy-MM-dd');
+                const events = byDate.get(dKey) ?? [];
+                const customs = customByDate.get(dKey) ?? [];
                 const isMuted = !isSameMonth(d, cursor);
                 const isToday = isSameDay(d, today);
                 const isSelected = isSameDay(d, selected);
                 const types = [...new Set(events.map((e) => TYPE_DOT[e.type]))];
+                const totalCount = events.length + customs.length;
                 return (
                   <button
                     key={format(d, 'yyyy-MM-dd')}
@@ -131,7 +169,10 @@ export function Calendar() {
                     <span className="d">{format(d, 'd')}</span>
                     <div className="dots">
                       {types.map((t) => <span key={t} className={`dot ${t}`} />)}
-                      {events.length > 0 && <span className="tiny" style={{ marginLeft: 2, opacity: .7 }}>{events.length}</span>}
+                      {customs.length > 0 && (
+                        <span className="dot" style={{ background: 'var(--ink-3)' }} title="Événement custom" />
+                      )}
+                      {totalCount > 0 && <span className="tiny" style={{ marginLeft: 2, opacity: .7 }}>{totalCount}</span>}
                     </div>
                   </button>
                 );
@@ -151,13 +192,35 @@ export function Calendar() {
               {format(selected, "EEEE d MMMM", { locale: fr })}
             </div>
             <div className="small muted" style={{ marginBottom: 14 }}>
-              {selectedEvents.length} événement{selectedEvents.length !== 1 ? 's' : ''}
+              {selectedEvents.length + selectedCustom.length} événement{(selectedEvents.length + selectedCustom.length) !== 1 ? 's' : ''}
             </div>
-            {selectedEvents.length === 0 && (
+            {selectedEvents.length === 0 && selectedCustom.length === 0 && (
               <div className="muted small" style={{ padding: '24px 0', textAlign: 'center' }}>
                 Rien de prévu ce jour-là.
               </div>
             )}
+            {selectedCustom.map((ev) => (
+              <div key={`c-${ev.id}`} style={{ padding: '12px 0', borderBottom: '1px solid var(--line)' }}>
+                <div className="row between">
+                  <Pill tone={ev.is_shared ? 'sage' : undefined}>
+                    {ev.is_shared && <UsersIcon size={11} style={{ marginRight: 4 }} />}
+                    {ev.kind === 'pro' ? 'Pro' : ev.kind === 'coloc' ? 'Coloc' : ev.kind === 'famille' ? 'Famille' : 'Perso'}
+                  </Pill>
+                  <button
+                    onClick={() => deleteEvent.mutate(ev.id)}
+                    title="Supprimer" aria-label="Supprimer"
+                    style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--ink-3)' }}
+                  >
+                    <Trash2 size={13} />
+                  </button>
+                </div>
+                <div style={{ fontWeight: 500, marginTop: 4 }}>{ev.label}</div>
+                {ev.description && <div className="small muted" style={{ marginTop: 2 }}>{ev.description}</div>}
+                <div className="small muted" style={{ marginTop: 2, fontSize: 11 }}>
+                  Ajouté par {ev.user_name || '—'}
+                </div>
+              </div>
+            ))}
             {selectedEvents.map((e, i) => (
               <div key={i} style={{ padding: '12px 0', borderBottom: '1px solid var(--line)' }}>
                 <div className="row between">
@@ -196,6 +259,121 @@ export function Calendar() {
           })}
         </div>
       )}
+
+      <NewCustomEventModal
+        open={creating}
+        onClose={() => setCreating(false)}
+        accounts={accounts.data ?? []}
+        defaultDate={format(selected, 'yyyy-MM-dd')}
+        onSaved={() => qc.invalidateQueries({ queryKey: ['custom-events'] })}
+      />
     </>
+  );
+}
+
+function NewCustomEventModal({
+  open, onClose, accounts, defaultDate, onSaved,
+}: {
+  open: boolean;
+  onClose: () => void;
+  accounts: Account[];
+  defaultDate: string;
+  onSaved: () => void;
+}) {
+  const [form, setForm] = useState<{
+    date: string;
+    label: string;
+    kind: CustomEventKind;
+    description: string;
+    is_shared: boolean;
+    account_id: number | null;
+  }>({
+    date: defaultDate,
+    label: '',
+    kind: 'perso',
+    description: '',
+    is_shared: false,
+    account_id: null,
+  });
+  const [error, setError] = useState<string | null>(null);
+
+  const sharedAccounts = accounts.filter((a) => a.type === 'Compte joint');
+
+  const submit = useMutation({
+    mutationFn: async () => {
+      if (form.is_shared && !form.account_id) {
+        throw new Error('Sélectionne un compte joint pour partager.');
+      }
+      await api.post('/custom-events/', {
+        ...form,
+        description: form.description || null,
+        account_id: form.is_shared ? form.account_id : null,
+      });
+    },
+    onSuccess: () => {
+      onSaved();
+      setForm({ ...form, label: '', description: '', is_shared: false, account_id: null });
+      onClose();
+    },
+    onError: (e) => setError(e instanceof Error ? e.message : 'Erreur'),
+  });
+
+  return (
+    <Modal open={open} onClose={onClose} title="Nouvel événement">
+      <form onSubmit={(e) => { e.preventDefault(); setError(null); submit.mutate(); }}>
+        <Field label="Date">
+          <Input type="date" required value={form.date}
+            onChange={(e) => setForm({ ...form, date: e.target.value })} />
+        </Field>
+        <Field label="Libellé">
+          <Input required value={form.label} placeholder="Ex : Apéro samedi, RDV médecin…"
+            onChange={(e) => setForm({ ...form, label: e.target.value })} />
+        </Field>
+        <Field label="Type">
+          <Select value={form.kind}
+            onChange={(e) => setForm({ ...form, kind: e.target.value as CustomEventKind })}>
+            <option value="perso">Perso</option>
+            <option value="coloc">Coloc</option>
+            <option value="famille">Famille</option>
+            <option value="pro">Pro</option>
+            <option value="autre">Autre</option>
+          </Select>
+        </Field>
+        <Field label="Description (optionnel)">
+          <Textarea rows={3} value={form.description}
+            onChange={(e) => setForm({ ...form, description: e.target.value })} />
+        </Field>
+        {sharedAccounts.length > 0 && (
+          <>
+            <label className="row gap-2" style={{ alignItems: 'center', margin: '6px 0' }}>
+              <input
+                type="checkbox" checked={form.is_shared}
+                onChange={(e) => setForm({ ...form, is_shared: e.target.checked })}
+              />
+              <UsersIcon size={14} />
+              <span style={{ fontSize: 13 }}>Partager avec les co-titulaires d'un compte</span>
+            </label>
+            {form.is_shared && (
+              <Field label="Compte joint">
+                <Select value={form.account_id ?? ''}
+                  onChange={(e) => setForm({ ...form, account_id: e.target.value ? Number(e.target.value) : null })}>
+                  <option value="">— Sélectionne —</option>
+                  {sharedAccounts.map((a) => (
+                    <option key={a.id} value={a.id}>{a.name}</option>
+                  ))}
+                </Select>
+              </Field>
+            )}
+          </>
+        )}
+        {error && <ErrorBox message={error} />}
+        <div className="row gap-2" style={{ justifyContent: 'flex-end', marginTop: 16 }}>
+          <Button type="button" onClick={onClose}>Annuler</Button>
+          <Button type="submit" variant="primary" disabled={submit.isPending}>
+            {submit.isPending ? 'Création…' : 'Créer'}
+          </Button>
+        </div>
+      </form>
+    </Modal>
   );
 }

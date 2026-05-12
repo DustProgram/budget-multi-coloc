@@ -9,16 +9,18 @@ import {
 } from '../components/ui';
 import { Sparkline } from '../components/charts/Sparkline';
 import { Avatar, AvatarStack } from '../components/Avatar';
+import { useSpace } from '../lib/space';
 import { ACCOUNT_TYPES, type Account, type AccountMember, type UserPickerEntry } from '../types';
 
 export function Accounts() {
   const qc = useQueryClient();
+  const { space } = useSpace();
   const [creating, setCreating] = useState(false);
   const [membersFor, setMembersFor] = useState<Account | null>(null);
 
   const accounts = useQuery({
-    queryKey: ['accounts'],
-    queryFn: async () => (await api.get<Account[]>('/accounts/')).data,
+    queryKey: ['accounts', space],
+    queryFn: async () => (await api.get<Account[]>(`/accounts/?space=${space}`)).data,
   });
 
   const total = (accounts.data ?? []).reduce((s, a) => s + num(a.initial_balance), 0);
@@ -121,6 +123,7 @@ function AccountCard({ account, onManageMembers }: { account: Account; onManageM
 }
 
 function NewAccountModal({ open, onClose, onSaved }: { open: boolean; onClose: () => void; onSaved: () => void }) {
+  const { space } = useSpace();
   const [form, setForm] = useState({
     name: '', bank: '', type: ACCOUNT_TYPES[0] as string,
     initial_balance: '0', notes: '',
@@ -132,6 +135,7 @@ function NewAccountModal({ open, onClose, onSaved }: { open: boolean; onClose: (
       await api.post('/accounts/', {
         ...form,
         initial_balance: form.initial_balance || '0',
+        space,
       });
     },
     onSuccess: () => {
