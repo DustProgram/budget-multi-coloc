@@ -4,6 +4,7 @@ import { FileText, Plus, Trash2 } from 'lucide-react';
 import { api } from '../lib/api';
 import { eur, num } from '../lib/format';
 import { useSpaceAccountIdsSet } from '../lib/useSpaceAccounts';
+import { useUsersDirectory } from '../lib/useUsersDirectory';
 import {
   FREQUENCIES, SPLIT_MODES, type Account, type Charge,
   type Frequency, type SplitMode,
@@ -22,6 +23,7 @@ export function Charges() {
     queryFn: async () => (await api.get<Charge[]>('/charges/')).data,
   });
   const spaceAccounts = useSpaceAccountIdsSet();
+  const users = useUsersDirectory();
   const accounts = useQuery({
     queryKey: ['accounts', 'all'],
     queryFn: async () => (await api.get<Account[]>('/accounts/')).data,
@@ -75,6 +77,7 @@ export function Charges() {
                 <th>Partage</th>
                 <th>Mode</th>
                 <th>Jour</th>
+                <th>Payeur</th>
                 <th className="r">Total</th>
                 <th className="r">Ma part</th>
                 <th></th>
@@ -89,6 +92,7 @@ export function Charges() {
                     <td><Pill tone={shared ? 'sage' : undefined}>{shared ? 'Coloc' : 'Perso'}</Pill></td>
                     <td>{c.split_mode}</td>
                     <td>Le {c.day_of_month}</td>
+                    <td className="muted small">{users.display(c.payer_user_id)}</td>
                     <td className="r num">{eur(c.total_amount)}</td>
                     <td className="r num neg display" style={{ fontSize: 17 }}>−{eur(c.my_share)}</td>
                     <td className="r">

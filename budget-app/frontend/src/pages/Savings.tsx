@@ -4,6 +4,7 @@ import { PiggyBank, Plus, Trash2 } from 'lucide-react';
 import { api } from '../lib/api';
 import { eur, num } from '../lib/format';
 import { useSpaceAccountIdsSet } from '../lib/useSpaceAccounts';
+import { useUsersDirectory } from '../lib/useUsersDirectory';
 import type { Account, Saving } from '../types';
 import {
   Button, Card, EmptyState, ErrorBox, Field, Input, Loader, Modal,
@@ -19,6 +20,7 @@ export function Savings() {
     queryFn: async () => (await api.get<Saving[]>('/savings/')).data,
   });
   const spaceAccounts = useSpaceAccountIdsSet();
+  const users = useUsersDirectory();
   const accounts = useQuery({
     queryKey: ['accounts', 'all'],
     queryFn: async () => (await api.get<Account[]>('/accounts/')).data,
@@ -74,6 +76,7 @@ export function Savings() {
                 <th>Règle</th>
                 <th>Flux</th>
                 <th>Jour</th>
+                <th>Par</th>
                 <th className="r">Montant</th>
                 <th></th>
               </tr>
@@ -86,6 +89,7 @@ export function Savings() {
                     {accById.get(r.source_account_id)?.name ?? '—'} → {accById.get(r.dest_account_id)?.name ?? '—'}
                   </td>
                   <td>Le {r.day_of_month}</td>
+                  <td className="muted small">{users.display(r.user_id)}</td>
                   <td className="r num display" style={{ fontSize: 18, color: 'var(--plum)' }}>
                     {eur(r.amount)}
                   </td>

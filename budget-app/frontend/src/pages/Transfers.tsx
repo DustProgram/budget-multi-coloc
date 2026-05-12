@@ -4,6 +4,7 @@ import { ArrowLeftRight, Plus, Trash2 } from 'lucide-react';
 import { api } from '../lib/api';
 import { eur, fmtDate, todayISO } from '../lib/format';
 import { useSpaceAccountIdsSet } from '../lib/useSpaceAccounts';
+import { useUsersDirectory } from '../lib/useUsersDirectory';
 import {
   FREQUENCIES, type Account, type Frequency,
   type OneTimeTransfer, type RecurringTransfer,
@@ -27,6 +28,7 @@ export function Transfers() {
     queryFn: async () => (await api.get<OneTimeTransfer[]>('/transfers/onetime/')).data,
   });
   const spaceAccounts = useSpaceAccountIdsSet();
+  const users = useUsersDirectory();
   const accounts = useQuery({
     queryKey: ['accounts', 'all'],
     queryFn: async () => (await api.get<Account[]>('/accounts/')).data,
@@ -89,7 +91,7 @@ export function Transfers() {
           <Card>
             <table className="t">
               <thead>
-                <tr><th>Libellé</th><th>Flux</th><th>Jour</th><th>Fréquence</th><th className="r">Montant</th><th></th></tr>
+                <tr><th>Libellé</th><th>Flux</th><th>Jour</th><th>Fréquence</th><th>Par</th><th className="r">Montant</th><th></th></tr>
               </thead>
               <tbody>
                 {recurring.data.map((r) => (
@@ -98,6 +100,7 @@ export function Transfers() {
                     <td>{accById.get(r.source_account_id)?.name ?? '—'} → {accById.get(r.dest_account_id)?.name ?? '—'}</td>
                     <td>Le {r.day_of_month}</td>
                     <td><Pill tone="plum">{r.frequency}</Pill></td>
+                    <td className="muted small">{users.display(r.user_id)}</td>
                     <td className="r num">{eur(r.amount)}</td>
                     <td className="r">
                       <Button variant="sm" onClick={() => { if (confirm(`Supprimer "${r.label}" ?`)) remove.mutate({ kind: 'recurring', id: r.id }); }}>
@@ -123,7 +126,7 @@ export function Transfers() {
           <Card>
             <table className="t">
               <thead>
-                <tr><th>Date</th><th>Libellé</th><th>Flux</th><th className="r">Montant</th><th></th></tr>
+                <tr><th>Date</th><th>Libellé</th><th>Flux</th><th>Par</th><th className="r">Montant</th><th></th></tr>
               </thead>
               <tbody>
                 {onetime.data.map((o) => (
@@ -131,6 +134,7 @@ export function Transfers() {
                     <td>{fmtDate(o.date)}</td>
                     <td><strong>{o.label}</strong></td>
                     <td>{accById.get(o.source_account_id)?.name ?? '—'} → {accById.get(o.dest_account_id)?.name ?? '—'}</td>
+                    <td className="muted small">{users.display(o.user_id)}</td>
                     <td className="r num">{eur(o.amount)}</td>
                     <td className="r">
                       <Button variant="sm" onClick={() => { if (confirm(`Supprimer "${o.label}" ?`)) remove.mutate({ kind: 'onetime', id: o.id }); }}>

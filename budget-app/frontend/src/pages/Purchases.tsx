@@ -4,6 +4,7 @@ import { ShoppingBag, Plus, Trash2 } from 'lucide-react';
 import { api } from '../lib/api';
 import { eur, fmtDate, todayISO, num } from '../lib/format';
 import { useSpaceAccountIdsSet } from '../lib/useSpaceAccounts';
+import { useUsersDirectory } from '../lib/useUsersDirectory';
 import { PAYMENT_METHODS, type Account, type PaymentMethod, type Purchase } from '../types';
 import {
   Button, Card, EmptyState, ErrorBox, Field, Input, Loader, Modal,
@@ -19,6 +20,7 @@ export function Purchases() {
     queryFn: async () => (await api.get<Purchase[]>('/purchases/')).data,
   });
   const spaceAccounts = useSpaceAccountIdsSet();
+  const users = useUsersDirectory();
   const accounts = useQuery({
     queryKey: ['accounts', 'all'],
     queryFn: async () => (await api.get<Account[]>('/accounts/')).data,
@@ -62,7 +64,7 @@ export function Purchases() {
           <table className="t">
             <thead>
               <tr>
-                <th>Date</th><th>Achat</th><th>Catégorie</th><th>Étalement</th>
+                <th>Date</th><th>Achat</th><th>Catégorie</th><th>Étalement</th><th>Par</th>
                 <th className="r">Total</th><th className="r">Mensualité</th><th></th>
               </tr>
             </thead>
@@ -73,6 +75,7 @@ export function Purchases() {
                   <td><strong>{p.description}</strong></td>
                   <td>{p.category && <Pill>{p.category}</Pill>}</td>
                   <td>{p.nb_installments === 1 ? 'Comptant' : `${p.nb_installments}× ${eur(p.monthly_amount)}`}</td>
+                  <td className="muted small">{users.display(p.user_id)}</td>
                   <td className="r num">{eur(p.total_amount)}</td>
                   <td className="r num neg display" style={{ fontSize: 17 }}>−{eur(p.monthly_amount)}</td>
                   <td className="r">

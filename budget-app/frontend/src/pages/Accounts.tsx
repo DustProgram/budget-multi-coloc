@@ -9,6 +9,7 @@ import {
 } from '../components/ui';
 import { Sparkline } from '../components/charts/Sparkline';
 import { Avatar, AvatarStack } from '../components/Avatar';
+import { AccountDetailModal } from '../components/AccountDetailModal';
 import { useSpace } from '../lib/space';
 import { ACCOUNT_TYPES, type Account, type AccountMember, type Me, type UserPickerEntry } from '../types';
 
@@ -17,6 +18,7 @@ export function Accounts() {
   const { space } = useSpace();
   const [creating, setCreating] = useState(false);
   const [membersFor, setMembersFor] = useState<Account | null>(null);
+  const [detailFor, setDetailFor] = useState<Account | null>(null);
 
   const accounts = useQuery({
     queryKey: ['accounts', space],
@@ -54,7 +56,11 @@ export function Accounts() {
       {accounts.data && accounts.data.length > 0 && (
         <div className="grid" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))' }}>
           {accounts.data.map((a) => (
-            <AccountCard key={a.id} account={a} onManageMembers={() => setMembersFor(a)} />
+            <AccountCard
+              key={a.id} account={a}
+              onManageMembers={() => setMembersFor(a)}
+              onShowDetail={() => setDetailFor(a)}
+            />
           ))}
         </div>
       )}
@@ -67,11 +73,23 @@ export function Accounts() {
           onChanged={() => qc.invalidateQueries({ queryKey: ['accounts', membersFor.id, 'members'] })}
         />
       )}
+      {detailFor && (
+        <AccountDetailModal
+          account={detailFor}
+          onClose={() => setDetailFor(null)}
+        />
+      )}
     </>
   );
 }
 
-function AccountCard({ account, onManageMembers }: { account: Account; onManageMembers: () => void }) {
+function AccountCard({
+  account, onManageMembers, onShowDetail,
+}: {
+  account: Account;
+  onManageMembers: () => void;
+  onShowDetail: () => void;
+}) {
   const qc = useQueryClient();
 
   const members = useQuery({
@@ -109,6 +127,7 @@ function AccountCard({ account, onManageMembers }: { account: Account; onManageM
         {memberList.length > 0 && <AvatarStack users={memberList} />}
       </div>
       <div className="row gap-2" style={{ marginTop: 12 }}>
+        <Button variant="sm" onClick={onShowDetail}>Mouvements</Button>
         <Button variant="sm" onClick={onManageMembers}>
           <Users size={12} /> Membres
         </Button>
