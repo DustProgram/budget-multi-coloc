@@ -1,5 +1,5 @@
 name: "Budget Multi-Coloc"
-version: "0.3.1"
+version: "0.3.2"
 slug: "budget_multi_coloc"
 description: "Gestionnaire de budget personnel et colocation avec stockage chiffré"
 url: "https://github.com/DustProgram/budget-multi-coloc/tree/main/budget-app"
@@ -30,9 +30,9 @@ panel_admin: false  # Tous les users HA peuvent voir l'icône, l'app filtre ensu
 
 # Port externe optionnel pour accès direct à /courses et /coloc-summary
 ports:
-  8765/tcp: 8765
+  8000/tcp: 8765
 ports_description:
-  8765/tcp: "Accès direct liste courses + coloc (optionnel)"
+  8000/tcp: "Accès externe (port 8765) avec token user — sans ingress HA"
 
 # Permissions
 hassio_api: false
