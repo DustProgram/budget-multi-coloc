@@ -1,0 +1,29 @@
+#!/usr/bin/with-contenv bashio
+# ==============================================================================
+# Démarrage du serveur FastAPI
+# ==============================================================================
+
+LOG_LEVEL=$(bashio::config 'log_level')
+DATA_DIR=$(bashio::config 'usb_mount_point')
+EXTERNAL_PORT_ENABLED=$(bashio::config 'external_port_enabled')
+
+export DATA_DIR
+export LOG_LEVEL
+export EXTERNAL_PORT_ENABLED
+export DATABASE_URL="sqlite:///${DATA_DIR}/db/budget.db?check_same_thread=False"
+
+# Modules autorisés sur le port externe
+if [ "${EXTERNAL_PORT_ENABLED}" = "true" ]; then
+    EXTERNAL_MODULES=$(bashio::config 'external_port_modules | join(",")')
+    export EXTERNAL_MODULES
+    bashio::log.info "🌐 Port externe activé sur 8765 pour modules : ${EXTERNAL_MODULES}"
+fi
+
+bashio::log.info "🚀 Démarrage du backend FastAPI (port 8000)..."
+
+cd /app
+exec python3 -m uvicorn main:app \
+    --host 0.0.0.0 \
+    --port 8000 \
+    --log-level "${LOG_LEVEL}" \
+    --no-access-log

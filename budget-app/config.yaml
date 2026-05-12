@@ -1,0 +1,87 @@
+name: "Budget Multi-Coloc"
+version: "0.1.3"
+slug: "budget_multi_coloc"
+description: "Gestionnaire de budget personnel et colocation avec stockage chiffré"
+url: "https://github.com/DustProgram/budget-multi-coloc/tree/main/budget-app"
+
+# Version minimale de Home Assistant requise
+homeassistant: "2024.1.0"
+
+# Architectures supportées (HA Green = aarch64)
+arch:
+  - aarch64
+  - amd64
+
+# Image Docker pré-buildée par GitHub Actions
+image: "ghcr.io/dustprogram/budget-multi-coloc-{arch}"
+
+# Démarrage
+startup: services
+boot: auto
+init: false
+
+# Le port "ingress" : intégration native HA (sidebar + auth auto)
+ingress: true
+ingress_port: 8000
+ingress_stream: false
+panel_icon: "mdi:cash-multiple"
+panel_title: "Budget"
+panel_admin: false  # Tous les users HA peuvent voir l'icône, l'app filtre ensuite
+
+# Port externe optionnel pour accès direct à /courses et /coloc-summary
+ports:
+  8765/tcp: 8765
+ports_description:
+  8765/tcp: "Accès direct liste courses + coloc (optionnel)"
+
+# Permissions
+hassio_api: false
+homeassistant_api: false
+auth_api: true              # Récupérer la liste des users HA
+host_network: false
+host_dbus: true             # Reçoit les événements udev quand on plug/déplug une clé
+apparmor: false             # AppArmor par défaut bloque dm-crypt / device-mapper
+privileged:                 # Caps minimales pour LUKS + montage dans le container
+  - SYS_ADMIN              # mount(), cryptsetup luksOpen
+  - SYS_RAWIO              # Accès aux block devices en raw
+  - DAC_READ_SEARCH        # Lire /dev/disk/by-uuid/... sans le mode root strict
+                           # (MKNOD n'est pas dans la liste blanche du supervisor :
+                           # udev crée /dev/mapper/<name> automatiquement)
+udev: true                  # Voir les clés USB qui apparaissent à chaud
+full_access: true           # Accès cgroup rwm sur tous les block devices host -
+                            # indispensable pour cryptsetup luksOpen sur /dev/sdX
+                            # (les caps seules ne suffisent pas sans la règle cgroup)
+
+# Volumes persistants : data sur la clé USB chiffrée
+map:
+  - "backup:rw"            # Pour les backups mensuels
+  - "share:rw"             # Pour exports PDF
+
+# Le service health-check FastAPI
+watchdog: "http://[HOST]:[PORT:8000]/api/health"
+
+# Configuration par défaut (modifiable dans l'UI HA)
+options:
+  usb_device: ""
+  usb_mount_point: "/data"
+  luks_passphrase: ""
+  log_level: "info"
+  backup_enabled: true
+  external_port_enabled: false
+  external_port_modules:
+    - "courses"
+    - "coloc-summary"
+  default_currency: "EUR"
+  default_locale: "fr_FR"
+
+schema:
+  usb_device: "str?"
+  usb_mount_point: str
+  luks_passphrase: "password?"
+  log_level: "list(trace|debug|info|notice|warning|error|fatal)"
+  backup_enabled: bool
+  external_port_enabled: bool
+  external_port_modules:
+    - "list(courses|coloc-summary)"
+  default_currency: "list(EUR|USD|GBP|CHF)"
+  default_locale: "list(fr_FR|en_US)"
