@@ -174,6 +174,30 @@ def test_pourcentage_mode(db, trio):
     assert splits[naim.id] == Decimal("20.00")
 
 
+def test_cotitulaire_voit_compte_joint_dans_list(db, trio):
+    """Régression 0.5.1 : un co-titulaire doit voir le compte joint
+    dans une requête équivalente à GET /api/accounts/, pas seulement
+    le créateur. On reproduit ici le SQL de list_accounts."""
+    from sqlalchemy import or_
+    from models import Account
+    from services.access import accessible_account_ids
+
+    lucas, camille, _naim, joint = trio
+
+    def visible_accounts(user_id: int) -> set[int]:
+        acc_ids = accessible_account_ids(db, user_id)
+        rows = db.query(Account).filter(
+            or_(Account.user_id == user_id, Account.id.in_(acc_ids))
+        ).all()
+        return {a.id for a in rows}
+
+    # Lucas (créateur) voit son compte
+    assert joint.id in visible_accounts(lucas.id)
+    # Camille (co-titulaire via AccountMember) doit AUSSI le voir
+    assert joint.id in visible_accounts(camille.id), \
+        "Co-titulaire devrait voir le compte joint via AccountMember"
+
+
 def test_solo_account_no_splits(db):
     """Compte sans AccountMember → pas de split même si split_mode=EGAL."""
     u = User(ha_user_id="solo", ha_username="solo", display_name="Solo")

@@ -7,8 +7,11 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
+from sqlalchemy import or_
+
 from models.base import get_db
 from models import Account, AccountType, User
+from services.access import accessible_account_ids
 
 router = APIRouter()
 
@@ -55,9 +58,13 @@ async def list_accounts(
     include_inactive: bool = False,
     space: Optional[str] = None,
 ):
-    """Comptes de l'user. ?space=perso|pro pour filtrer (sinon tout)."""
+    """Comptes accessibles à l'user : ceux qu'il a créés + ceux où il est
+    co-titulaire (account_members). ?space=perso|pro pour filtrer."""
     user: User = request.state.user
-    q = db.query(Account).filter(Account.user_id == user.id)
+    acc_ids = accessible_account_ids(db, user.id)
+    q = db.query(Account).filter(
+        or_(Account.user_id == user.id, Account.id.in_(acc_ids))
+    )
     if not include_inactive:
         q = q.filter(Account.is_active.is_(True))
     if space in ("perso", "pro"):
