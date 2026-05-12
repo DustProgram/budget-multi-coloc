@@ -4,6 +4,7 @@ import { TrendingUp, Plus, Trash2 } from 'lucide-react';
 import { api } from '../lib/api';
 import { eur, num } from '../lib/format';
 import { useSpaceAccountIdsSet } from '../lib/useSpaceAccounts';
+import { useUsersDirectory } from '../lib/useUsersDirectory';
 import { INCOME_TYPES, type Account, type Income, type IncomeTypeName } from '../types';
 import {
   Button, Card, EmptyState, ErrorBox, Field, Input, Loader, Modal,
@@ -19,6 +20,7 @@ export function Incomes() {
     queryFn: async () => (await api.get<Income[]>('/incomes/')).data,
   });
   const spaceAccounts = useSpaceAccountIdsSet();
+  const users = useUsersDirectory();
   // Tous les comptes (pas filtrés) pour la modal de création
   const accounts = useQuery({
     queryKey: ['accounts', 'all'],
@@ -71,6 +73,7 @@ export function Incomes() {
                 <th>Type</th>
                 <th>Jour</th>
                 <th>Compte</th>
+                <th>Par</th>
                 <th className="r">Montant</th>
                 <th></th>
               </tr>
@@ -82,6 +85,7 @@ export function Incomes() {
                   <td><Pill>{i.type}</Pill></td>
                   <td>Le {i.day_of_month}</td>
                   <td>{i.account_id ? accById.get(i.account_id)?.name ?? '—' : '—'}</td>
+                  <td className="muted small">{users.display(i.user_id)}</td>
                   <td className="r num pos display" style={{ fontSize: 18 }}>+{eur(i.amount)}</td>
                   <td className="r">
                     <Button variant="sm" onClick={() => { if (confirm(`Supprimer "${i.source}" ?`)) remove.mutate(i.id); }}>

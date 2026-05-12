@@ -3,11 +3,13 @@ import { useQuery } from '@tanstack/react-query';
 import { ChevronLeft, ChevronRight } from 'lucide-react';
 import { api } from '../lib/api';
 import { eur, num } from '../lib/format';
-import type { CalendarEvent, EventType, UpcomingResponse } from '../types';
+import type { Account, CalendarEvent, EventType, UpcomingResponse } from '../types';
 import {
-  Button, Card, EmptyState, ErrorBox, Kpi, Loader, PageHeader, Pill,
+  Button, Card, EmptyState, ErrorBox, Kpi, Loader, PageHeader, Pill, Select,
 } from '../components/ui';
 import { BalanceCurve } from '../components/charts/BalanceCurve';
+
+type AccountFilter = 'all' | 'perso' | 'joint' | number;
 
 const MONTHS = ['Janvier','Février','Mars','Avril','Mai','Juin','Juillet','Août','Septembre','Octobre','Novembre','Décembre'];
 
@@ -28,11 +30,16 @@ const TYPE_TONE: Record<EventType, 'sage' | 'rose' | 'plum' | 'amber'> = {
 export function MonthlyView() {
   const today = new Date();
   const [cursor, setCursor] = useState({ year: today.getFullYear(), month: today.getMonth() + 1 });
+  const [filter, setFilter] = useState<AccountFilter>('all');
 
   const query = useQuery({
     queryKey: ['upcoming', 'monthly', cursor.year, cursor.month],
     queryFn: async () =>
       (await api.get<UpcomingResponse>('/calendar/upcoming', { params: { days: 90 } })).data,
+  });
+  const accountsQ = useQuery({
+    queryKey: ['accounts'],
+    queryFn: async () => (await api.get<Account[]>('/accounts/')).data,
   });
 
   function shift(delta: number) {
@@ -40,14 +47,33 @@ export function MonthlyView() {
     setCursor({ year: d.getFullYear(), month: d.getMonth() + 1 });
   }
 
+  // Set des account_ids qui matchent le filtre courant
+  const filteredAccountIds = useMemo(() => {
+    const all = accountsQ.data ?? [];
+    if (filter === 'all') return new Set(all.map((a) => a.id));
+    if (filter === 'perso') {
+      // perso = compte solo (space=perso ET pas joint multi-membres) ; on
+      // approxime simplement par space=perso
+      return new Set(all.filter((a) => a.space === 'perso').map((a) => a.id));
+    }
+    if (filter === 'joint') {
+      // joint = type "Compte joint" OU compte avec members ≥ 2 (on n'a pas
+      // les members ici sans appel séparé) → on filtre sur le type
+      return new Set(all.filter((a) => a.type === 'Compte joint').map((a) => a.id));
+    }
+    // filter is a specific account id
+    return new Set([filter as number]);
+  }, [filter, accountsQ.data]);
+
   const events = useMemo(() => {
     return (query.data?.events ?? [])
       .filter((e) => {
         const [y, m] = e.date.split('-').map(Number);
         return y === cursor.year && m === cursor.month;
       })
+      .filter((e) => filteredAccountIds.has(e.account_id))
       .sort((a, b) => a.date.localeCompare(b.date));
-  }, [query.data, cursor]);
+  }, [query.data, cursor, filteredAccountIds]);
 
   const totals = useMemo(() => {
     let income = 0, expense = 0;
@@ -84,6 +110,22 @@ export function MonthlyView() {
         title={`${MONTHS[cursor.month - 1]} ${cursor.year}`}
         subtitle={`${events.length} événement${events.length > 1 ? 's' : ''} sur le mois.`}
       >
+        <Select
+          value={typeof filter === 'number' ? String(filter) : filter}
+          onChange={(e) => {
+            const v = e.target.value;
+            setFilter(v === 'all' || v === 'perso' || v === 'joint' ? v : Number(v));
+          }}
+          style={{ minWidth: 180 }}
+        >
+          <option value="all">Tous les comptes</option>
+          <option value="perso">Comptes perso</option>
+          <option value="joint">Comptes joints</option>
+          <option disabled>──────────</option>
+          {(accountsQ.data ?? []).map((a) => (
+            <option key={a.id} value={a.id}>{a.name} — {a.bank}</option>
+          ))}
+        </Select>
         <Button onClick={() => shift(-1)}><ChevronLeft size={14} /></Button>
         <Button variant="primary">{MONTHS[cursor.month - 1]} {cursor.year}</Button>
         <Button onClick={() => shift(1)}><ChevronRight size={14} /></Button>

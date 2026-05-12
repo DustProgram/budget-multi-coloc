@@ -66,6 +66,7 @@ class RecurringOut(BaseModel):
     frequency: str
     is_active: bool
     notes: Optional[str]
+    user_id: int
 
     class Config:
         from_attributes = True
@@ -178,6 +179,7 @@ class OneTimeOut(BaseModel):
     dest_account_id: int
     amount: Decimal
     notes: Optional[str]
+    user_id: int
 
     class Config:
         from_attributes = True

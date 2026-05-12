@@ -60,6 +60,7 @@ class PurchaseOut(BaseModel):
     payment_method: str
     account_id: Optional[int]
     notes: Optional[str]
+    user_id: int
 
     class Config:
         from_attributes = True
@@ -68,6 +69,7 @@ class PurchaseOut(BaseModel):
 def _to_out(p: Purchase) -> PurchaseOut:
     return PurchaseOut(
         id=p.id,
+        user_id=p.user_id,
         date=p.date,
         description=p.description,
         total_amount=p.total_amount,

@@ -9,6 +9,10 @@ import {
 } from '../components/ui';
 
 const QUICKS = [50, 100, 250, 500, 1000];
+// Seuil de "tight" : si après l'achat le solde fin de mois passe sous ce montant
+// on affiche "Oui, mais…" au lieu de "Oui." franc. Réglable côté user plus tard
+// si besoin — pour l'instant on garde un défaut raisonnable.
+const TIGHT_THRESHOLD = 100;
 
 export function Simulator() {
   const today = new Date();
@@ -36,22 +40,43 @@ export function Simulator() {
   });
 
   const result = sim.data;
-  const ok = result?.can_afford_global && (accountId === null || result?.can_afford_account);
-  const tight = ok && result && num(result.available_after) < 200;
+
+  // Verdict basé sur le SOLDE FIN DE MOIS (pas la "marge" qu'on enlève)
+  // - Si solde final négatif : Non
+  // - Si solde final positif mais sous TIGHT_THRESHOLD : Oui mais…
+  // - Sinon : Oui
+  // Si un compte est sélectionné, on regarde aussi le solde de ce compte
+  // après achat — un solde compte négatif tue le verdict (découvert).
+  const monthlyImpact = (num(amount) / installments);
+  const finalAfter = result ? num(result.final_balance_after) : 0;
+  const accountAfter = result?.account_balance_after !== null
+    && result?.account_balance_after !== undefined
+    ? num(result.account_balance_after)
+    : null;
+
+  let ok = false;
+  let tight = false;
+  if (result) {
+    const globalOK = finalAfter >= 0;
+    const accountOK = accountAfter === null ? true : accountAfter >= 0;
+    ok = globalOK && accountOK;
+    tight = ok && (finalAfter < TIGHT_THRESHOLD || (accountAfter !== null && accountAfter < TIGHT_THRESHOLD));
+  }
+
   const verdict = !result ? null : !ok ? 'no' : tight ? 'warn' : 'yes';
   const stamp = !result ? '' : !ok ? 'Non.' : tight ? 'Oui, mais…' : 'Oui.';
   const msg = !result ? '' : !ok
-    ? `Cet achat ferait passer ta marge à ${eur(result.available_after)}. Mieux vaut attendre.`
+    ? `Ce ${installments > 1 ? 'crédit' : 'achat'} ferait passer ton solde fin de mois à ${eur(finalAfter)}${accountAfter !== null && accountAfter < 0 ? ` (et ton compte à ${eur(accountAfter)} — découvert)` : ''}. Mieux vaut attendre.`
     : tight
-    ? `Ça passe, mais ta marge tomberait à ${eur(result.available_after)} — attention aux extras d'ici fin de mois.`
-    : `Tranquille. Il te resterait ${eur(result.available_after)} de marge après cet achat.`;
+    ? `Ça passe : solde fin de mois ${eur(finalAfter)}${accountAfter !== null ? ` (compte : ${eur(accountAfter)})` : ''}. Tu seras juste, fais attention aux extras.`
+    : `Tranquille. Solde fin de mois ${eur(finalAfter)}${accountAfter !== null ? ` · solde compte ${eur(accountAfter)}` : ''}.`;
 
   return (
     <>
       <PageHeader
         eyebrow="Simulateur"
         title="Puis-je acheter ça ?"
-        subtitle="Test instantané sur ta marge réelle, après charges, épargne et achats prévus."
+        subtitle="Le verdict regarde ton solde fin de mois après l'achat — pas une marge théorique."
       />
 
       <div className="grid" style={{ gridTemplateColumns: '1fr 1fr', gap: 16, marginBottom: 24 }}>
@@ -108,33 +133,59 @@ export function Simulator() {
 
       {result && (
         <>
-          <div className="grid" style={{ gridTemplateColumns: 'repeat(4, 1fr)', gap: 16, marginBottom: 24 }}>
-            <Kpi label="Marge avant" value={eur(result.available_before)} />
-            <Kpi label="Impact mensuel"
-              value={`−${eur((num(amount) / installments).toFixed(2))}`}
-              subClass="neg" />
-            <Kpi label="Marge après" value={eur(result.available_after)}
-              subClass={ok ? 'pos' : 'neg'} />
-            <Kpi label="Solde fin de mois" value={eur(result.final_balance_after)} />
+          <div className="grid" style={{ gridTemplateColumns: 'repeat(3, 1fr)', gap: 16, marginBottom: 24 }}>
+            <Kpi label="Solde fin de mois avant" value={eur(result.final_balance_before)} />
+            <Kpi
+              label="Impact"
+              value={installments === 1 ? `−${eur(monthlyImpact)}` : `−${eur(monthlyImpact)} × ${installments}`}
+              subClass="neg"
+            />
+            <Kpi
+              label="Solde fin de mois après"
+              value={eur(finalAfter)}
+              tinted
+              subClass={ok ? 'pos' : 'neg'}
+            />
           </div>
 
           <Card>
-            <div className="card-title" style={{ marginBottom: 14 }}>Détail du verdict</div>
+            <div className="card-title" style={{ marginBottom: 14 }}>Détail du calcul</div>
             <table className="t">
               <tbody>
-                <tr><td>Marge actuelle</td><td className="r num">{eur(result.available_before)}</td></tr>
-                <tr><td>Cet achat ({installments}× {eur((num(amount) / installments).toFixed(2))})</td>
-                  <td className="r num neg">−{eur((num(amount) / installments).toFixed(2))}</td></tr>
-                <tr style={{ background: ok ? 'var(--sage-bg)' : 'var(--rose-bg)' }}>
-                  <td><strong>Marge restante</strong></td>
-                  <td className={`r num ${ok ? 'pos' : 'neg'}`}><strong>{eur(result.available_after)}</strong></td>
+                <tr>
+                  <td>Solde fin de mois actuel (sans cet achat)</td>
+                  <td className="r num">{eur(result.final_balance_before)}</td>
                 </tr>
-                {result.account_balance_after !== null && (
-                  <tr><td>Solde du compte après</td>
-                    <td className="r num">{eur(result.account_balance_after)}</td></tr>
+                <tr>
+                  <td>
+                    Mensualité de l'achat ({installments}× {eur(monthlyImpact)})
+                  </td>
+                  <td className="r num neg">−{eur(monthlyImpact)}</td>
+                </tr>
+                <tr style={{ background: ok ? 'var(--sage-bg)' : 'var(--rose-bg)' }}>
+                  <td><strong>Solde fin de mois après cet achat</strong></td>
+                  <td className={`r num ${ok ? 'pos' : 'neg'}`}>
+                    <strong>{eur(finalAfter)}</strong>
+                  </td>
+                </tr>
+                {accountAfter !== null && (
+                  <tr style={{ background: accountAfter >= 0 ? 'var(--sage-bg)' : 'var(--rose-bg)' }}>
+                    <td>
+                      <strong>Solde du compte sélectionné après</strong>
+                    </td>
+                    <td className={`r num ${accountAfter >= 0 ? 'pos' : 'neg'}`}>
+                      <strong>{eur(accountAfter)}</strong>
+                      {accountAfter < 0 && <span className="small"> (découvert)</span>}
+                    </td>
+                  </tr>
                 )}
               </tbody>
             </table>
+            <p className="small muted" style={{ marginTop: 12 }}>
+              Le verdict prend en compte les revenus du mois, charges, épargne
+              automatique et achats déjà imputés. Pas de "marge minimum" cachée
+              — le seuil "Oui mais…" est juste {eur(TIGHT_THRESHOLD)} de coussin.
+            </p>
           </Card>
         </>
       )}

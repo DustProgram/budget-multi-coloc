@@ -47,6 +47,7 @@ class SavingOut(BaseModel):
     day_of_month: int
     is_active: bool
     notes: Optional[str]
+    user_id: int
 
     class Config:
         from_attributes = True

@@ -87,6 +87,7 @@ export interface Income {
   account_id: number | null;
   notes: string | null;
   is_active: boolean;
+  user_id: number;
 }
 
 export const FREQUENCIES = [
@@ -137,6 +138,7 @@ export interface RecurringTransfer {
   frequency: Frequency;
   is_active: boolean;
   notes: string | null;
+  user_id: number;
 }
 
 export interface OneTimeTransfer {
@@ -147,6 +149,7 @@ export interface OneTimeTransfer {
   dest_account_id: number;
   amount: string;
   notes: string | null;
+  user_id: number;
 }
 
 export interface Saving {
@@ -158,6 +161,7 @@ export interface Saving {
   day_of_month: number;
   is_active: boolean;
   notes: string | null;
+  user_id: number;
 }
 
 export const PAYMENT_METHODS = [
@@ -181,6 +185,7 @@ export interface Purchase {
   payment_method: PaymentMethod;
   account_id: number | null;
   notes: string | null;
+  user_id: number;
 }
 
 // ============================================================

@@ -49,11 +49,44 @@ const TYPE_TONE: Record<EventType, 'sage' | 'rose' | 'plum' | 'amber'> = {
 
 const DAYS = ['Lun', 'Mar', 'Mer', 'Jeu', 'Ven', 'Sam', 'Dim'];
 
+type FilterKey = 'income' | 'charge' | 'transfer' | 'saving' | 'purchase' | 'custom';
+
+const FILTER_LABELS: Record<FilterKey, string> = {
+  income: 'Revenus',
+  charge: 'Charges',
+  transfer: 'Virements',
+  saving: 'Épargne',
+  purchase: 'Achats',
+  custom: 'Événements perso',
+};
+
+function matchesFilter(eventType: EventType | 'custom', enabled: Set<FilterKey>): boolean {
+  if (eventType === 'income') return enabled.has('income');
+  if (eventType === 'charge') return enabled.has('charge');
+  if (eventType === 'purchase') return enabled.has('purchase');
+  if (eventType.startsWith('transfer_')) return enabled.has('transfer');
+  if (eventType.startsWith('saving_')) return enabled.has('saving');
+  if (eventType === 'custom') return enabled.has('custom');
+  return true;
+}
+
 export function Calendar() {
   const qc = useQueryClient();
   const [cursor, setCursor] = useState<Date>(() => new Date());
   const [selected, setSelected] = useState<Date>(() => new Date());
   const [creating, setCreating] = useState(false);
+  const [enabledFilters, setEnabledFilters] = useState<Set<FilterKey>>(
+    () => new Set(['income', 'charge', 'transfer', 'saving', 'purchase', 'custom']),
+  );
+
+  function toggleFilter(k: FilterKey) {
+    setEnabledFilters((cur) => {
+      const next = new Set(cur);
+      if (next.has(k)) next.delete(k);
+      else next.add(k);
+      return next;
+    });
+  }
 
   const query = useQuery({
     queryKey: ['calendar', 'upcoming', 180],
@@ -83,22 +116,24 @@ export function Calendar() {
   const byDate = useMemo(() => {
     const map = new Map<string, CalendarEvent[]>();
     for (const e of query.data?.events ?? []) {
+      if (!matchesFilter(e.type, enabledFilters)) continue;
       const list = map.get(e.date) ?? [];
       list.push(e);
       map.set(e.date, list);
     }
     return map;
-  }, [query.data]);
+  }, [query.data, enabledFilters]);
 
   const customByDate = useMemo(() => {
     const map = new Map<string, CustomEvent[]>();
+    if (!enabledFilters.has('custom')) return map;
     for (const ev of custom.data ?? []) {
       const list = map.get(ev.date) ?? [];
       list.push(ev);
       map.set(ev.date, list);
     }
     return map;
-  }, [custom.data]);
+  }, [custom.data, enabledFilters]);
 
   const monthStart = startOfMonth(cursor);
   const monthEnd = endOfMonth(cursor);
@@ -140,6 +175,39 @@ export function Calendar() {
           <Plus size={14} /> Événement
         </Button>
       </PageHeader>
+
+      {/* Filtres par type d'événement */}
+      <div
+        className="row gap-2"
+        style={{ marginBottom: 16, flexWrap: 'wrap' }}
+        role="group"
+        aria-label="Filtres d'événements"
+      >
+        {(['income', 'charge', 'transfer', 'saving', 'purchase', 'custom'] as FilterKey[]).map((k) => {
+          const active = enabledFilters.has(k);
+          const tone: Record<FilterKey, string> = {
+            income: 'sage', charge: 'rose', transfer: 'plum',
+            saving: 'plum', purchase: 'amber', custom: 'terra',
+          };
+          return (
+            <button
+              key={k}
+              onClick={() => toggleFilter(k)}
+              type="button"
+              className={`pill ${active ? tone[k] : ''}`}
+              style={{
+                cursor: 'pointer',
+                opacity: active ? 1 : 0.4,
+                border: active ? '1px solid currentColor' : '1px solid var(--line)',
+                fontWeight: 500,
+                padding: '5px 12px',
+              }}
+            >
+              {FILTER_LABELS[k]}
+            </button>
+          );
+        })}
+      </div>
 
       {query.isLoading && <Loader />}
       {query.isError && <ErrorBox message="Erreur de chargement des événements." />}
