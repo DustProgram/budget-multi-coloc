@@ -341,6 +341,47 @@ export interface Me {
 // Shopping
 // ============================================================
 
+// ============================================================
+// Chat IA
+// ============================================================
+
+export interface ChatConversation {
+  id: number;
+  title: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ChatToolCall {
+  id: string;
+  name: string;
+  input: Record<string, unknown>;
+}
+
+export interface ChatMessage {
+  id: number;
+  conversation_id: number;
+  role: 'user' | 'assistant' | 'tool_result';
+  content: string | null;
+  tool_calls: ChatToolCall[] | null;
+  created_at: string;
+}
+
+export type ChatActionStatus = 'pending' | 'executed' | 'cancelled' | 'undone';
+
+export interface ChatAction {
+  id: number;
+  message_id: number;
+  tool_name: string;
+  tool_input: Record<string, unknown>;
+  status: ChatActionStatus;
+  entity_type: string | null;
+  entity_id: number | null;
+  result: Record<string, unknown> | null;
+  created_at: string;
+  executed_at: string | null;
+}
+
 export type ShoppingPriority = 'low' | 'normal' | 'high' | 'urgent';
 
 export interface ShoppingItem {

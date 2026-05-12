@@ -515,4 +515,58 @@ class ExternalCredential(Base):
     created_at = Column(DateTime, default=datetime.utcnow)
     last_login_at = Column(DateTime, nullable=True)
 
+
+# ============================================================
+# Chat IA (Claude API + function calling)
+# ============================================================
+
+class ChatConversation(Base):
+    """Conversation avec l'assistant IA, scopée par user."""
+    __tablename__ = "chat_conversations"
+
+    id = Column(Integer, primary_key=True)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    title = Column(String(160), nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+
+
+class ChatMessage(Base):
+    """Tour de conversation : user, assistant (avec ou sans tool_calls) ou tool result."""
+    __tablename__ = "chat_messages"
+
+    id = Column(Integer, primary_key=True)
+    conversation_id = Column(
+        Integer, ForeignKey("chat_conversations.id", ondelete="CASCADE"),
+        nullable=False, index=True,
+    )
+    role = Column(String(20), nullable=False)  # 'user' | 'assistant'
+    content = Column(Text, nullable=True)
+    tool_calls = Column(Text, nullable=True)  # JSON: list of {id, name, input}
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+
+
+class ChatAction(Base):
+    """Action proposée ou exécutée par l'IA. Permet confirmation > 50€ et undo."""
+    __tablename__ = "chat_actions"
+
+    id = Column(Integer, primary_key=True)
+    message_id = Column(
+        Integer, ForeignKey("chat_messages.id", ondelete="CASCADE"),
+        nullable=False, index=True,
+    )
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    tool_name = Column(String(60), nullable=False)
+    tool_input = Column(Text, nullable=False)  # JSON
+    status = Column(String(20), default="executed", nullable=False)
+    # 'pending'   : en attente de confirmation utilisateur (montant >= 50€)
+    # 'executed'  : déjà appliqué en DB
+    # 'cancelled' : refusé par l'utilisateur
+    # 'undone'    : exécuté puis annulé manuellement
+    entity_type = Column(String(40), nullable=True)
+    entity_id = Column(Integer, nullable=True)
+    result = Column(Text, nullable=True)  # JSON: réponse renvoyée à Claude
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    executed_at = Column(DateTime, nullable=True)
+
     user = relationship("User")

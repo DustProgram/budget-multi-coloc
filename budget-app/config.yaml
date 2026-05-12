@@ -1,5 +1,5 @@
 name: "Budget Multi-Coloc"
-version: "0.5.5"
+version: "0.6.0-beta1"
 slug: "budget_multi_coloc"
 description: "Gestionnaire de budget personnel et colocation avec stockage chiffré"
 url: "https://github.com/DustProgram/budget-multi-coloc/tree/main/budget-app"
@@ -73,6 +73,7 @@ options:
     - "coloc-summary"
   default_currency: "EUR"
   default_locale: "fr_FR"
+  claude_api_key: ""
 
 schema:
   usb_device: "str?"
@@ -85,3 +86,4 @@ schema:
     - "list(courses|coloc-summary)"
   default_currency: "list(EUR|USD|GBP|CHF)"
   default_locale: "list(fr_FR|en_US)"
+  claude_api_key: "password?"
