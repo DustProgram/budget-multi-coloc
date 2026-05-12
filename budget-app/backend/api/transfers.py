@@ -71,7 +71,7 @@ class RecurringOut(BaseModel):
         from_attributes = True
 
 
-@router.get("/recurring", response_model=list[RecurringOut])
+@router.get("/recurring/", response_model=list[RecurringOut])
 async def list_recurring(
     request: Request,
     db: Session = Depends(get_db),
@@ -92,7 +92,7 @@ async def list_recurring(
     return q.order_by(RecurringTransfer.day_of_month).all()
 
 
-@router.post("/recurring", response_model=RecurringOut, status_code=201)
+@router.post("/recurring/", response_model=RecurringOut, status_code=201)
 async def create_recurring(
     request: Request,
     payload: RecurringCreate,
@@ -183,7 +183,7 @@ class OneTimeOut(BaseModel):
         from_attributes = True
 
 
-@router.get("/onetime", response_model=list[OneTimeOut])
+@router.get("/onetime/", response_model=list[OneTimeOut])
 async def list_onetime(
     request: Request,
     db: Session = Depends(get_db),
@@ -208,7 +208,7 @@ async def list_onetime(
     return q.order_by(OneTimeTransfer.date.desc()).all()
 
 
-@router.post("/onetime", response_model=OneTimeOut, status_code=201)
+@router.post("/onetime/", response_model=OneTimeOut, status_code=201)
 async def create_onetime(
     request: Request,
     payload: OneTimeCreate,

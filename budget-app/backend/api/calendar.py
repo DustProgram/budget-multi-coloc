@@ -83,35 +83,60 @@ async def list_upcoming_events(
     Chaque événement contient `balance_after` : le solde du compte concerné
     juste après que l'événement soit validé (utile pour l'estimation au clic).
     """
+    from sqlalchemy import or_
+    from services.access import accessible_account_ids
+
     user: User = request.state.user
     today = from_date or date.today()
     end = today + timedelta(days=max(days, 0))
 
+    # Élargir : tous les comptes accessibles à l'user (perso + joints)
+    acc_ids = accessible_account_ids(db, user.id)
+
     accounts = db.query(Account).filter(
-        Account.user_id == user.id, Account.is_active.is_(True),
+        or_(Account.user_id == user.id, Account.id.in_(acc_ids)),
+        Account.is_active.is_(True),
     ).all()
     acc_by_id = {a.id: a for a in accounts}
     starting = {a.id: (a.initial_balance or Decimal(0)) for a in accounts}
     running = dict(starting)
 
     incomes = db.query(Income).filter(
-        Income.user_id == user.id, Income.is_active.is_(True),
+        or_(Income.user_id == user.id, Income.account_id.in_(acc_ids)),
+        Income.is_active.is_(True),
     ).all()
     charges = db.query(Charge).filter(
-        Charge.user_id == user.id, Charge.is_active.is_(True),
+        or_(Charge.user_id == user.id, Charge.account_id.in_(acc_ids)),
+        Charge.is_active.is_(True),
     ).all()
     rec_transfers = db.query(RecurringTransfer).filter(
-        RecurringTransfer.user_id == user.id, RecurringTransfer.is_active.is_(True),
+        or_(
+            RecurringTransfer.user_id == user.id,
+            RecurringTransfer.source_account_id.in_(acc_ids),
+            RecurringTransfer.dest_account_id.in_(acc_ids),
+        ),
+        RecurringTransfer.is_active.is_(True),
     ).all()
     ot_transfers = db.query(OneTimeTransfer).filter(
-        OneTimeTransfer.user_id == user.id,
+        or_(
+            OneTimeTransfer.user_id == user.id,
+            OneTimeTransfer.source_account_id.in_(acc_ids),
+            OneTimeTransfer.dest_account_id.in_(acc_ids),
+        ),
         OneTimeTransfer.date >= today,
         OneTimeTransfer.date <= end,
     ).all()
     savings = db.query(AutoSaving).filter(
-        AutoSaving.user_id == user.id, AutoSaving.is_active.is_(True),
+        or_(
+            AutoSaving.user_id == user.id,
+            AutoSaving.source_account_id.in_(acc_ids),
+            AutoSaving.dest_account_id.in_(acc_ids),
+        ),
+        AutoSaving.is_active.is_(True),
     ).all()
-    purchases = db.query(Purchase).filter(Purchase.user_id == user.id).all()
+    purchases = db.query(Purchase).filter(
+        or_(Purchase.user_id == user.id, Purchase.account_id.in_(acc_ids))
+    ).all()
 
     raw: list[tuple] = []  # (date, type, label, amount, account_id, source_kind, source_id)
 

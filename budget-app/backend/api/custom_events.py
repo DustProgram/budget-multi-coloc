@@ -101,7 +101,7 @@ async def create_event(
     # Si is_shared sans account_id : refuser (sinon personne ne le verra)
     if payload.is_shared and not payload.account_id:
         raise HTTPException(400, "Pour partager un événement, sélectionne un compte joint.")
-    if payload.account_id and user.id not in accessible_account_ids(db, payload.account_id):
+    if payload.account_id and payload.account_id not in accessible_account_ids(db, user.id):
         raise HTTPException(403, "Ce compte n'est pas dans ta liste.")
 
     ev = CustomEvent(**payload.model_dump(), user_id=user.id)
