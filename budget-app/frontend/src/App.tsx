@@ -24,6 +24,7 @@ const MonthlyView = lazy(() => import('./pages/MonthlyView').then((m) => ({ defa
 const YearlyView = lazy(() => import('./pages/YearlyView').then((m) => ({ default: m.YearlyView })));
 const Settings = lazy(() => import('./pages/Settings').then((m) => ({ default: m.Settings })));
 const ComptaPro = lazy(() => import('./pages/ComptaPro').then((m) => ({ default: m.ComptaPro })));
+const Events = lazy(() => import('./pages/Events').then((m) => ({ default: m.Events })));
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -108,6 +109,9 @@ export default function App() {
               } />
               <Route path="compta-pro" element={
                 <Suspense fallback={<PageFallback />}><ComptaPro /></Suspense>
+              } />
+              <Route path="events" element={
+                <Suspense fallback={<PageFallback />}><Events /></Suspense>
               } />
               <Route path="settings" element={
                 <Suspense fallback={<PageFallback />}><Settings /></Suspense>

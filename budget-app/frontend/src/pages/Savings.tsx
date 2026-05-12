@@ -3,6 +3,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { PiggyBank, Plus, Trash2, Pencil } from 'lucide-react';
 import { api } from '../lib/api';
 import { eur, num } from '../lib/format';
+import { useAutoEdit } from '../lib/useAutoEdit';
 import { useSpaceAccountIdsSet } from '../lib/useSpaceAccounts';
 import { useUsersDirectory } from '../lib/useUsersDirectory';
 import type { Account, Saving } from '../types';
@@ -33,6 +34,7 @@ export function Savings() {
           || spaceAccounts.idsSet.has(r.dest_account_id),
     ),
   };
+  useAutoEdit(allRules.data, setEditing);
 
   const total = rules.data
     .filter((r) => r.is_active)

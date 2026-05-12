@@ -3,10 +3,11 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { FileText, Plus, Trash2, Pencil } from 'lucide-react';
 import { api } from '../lib/api';
 import { eur, num } from '../lib/format';
+import { useAutoEdit } from '../lib/useAutoEdit';
 import { useSpaceAccountIdsSet } from '../lib/useSpaceAccounts';
 import { useUsersDirectory } from '../lib/useUsersDirectory';
 import {
-  FREQUENCIES, SPLIT_MODES, type Account, type Charge,
+  FREQUENCIES, SPLIT_MODES, type Account, type AccountMember, type Charge,
   type Frequency, type SplitMode,
 } from '../types';
 import {
@@ -37,6 +38,7 @@ export function Charges() {
       (c) => c.account_id !== null && spaceAccounts.idsSet.has(c.account_id),
     ),
   };
+  useAutoEdit(allCharges.data, setEditing);
   const myTotal = charges.data.reduce((s, c) => s + num(c.my_share), 0);
 
   const remove = useMutation({
@@ -93,7 +95,9 @@ export function Charges() {
                     <td><Pill tone={shared ? 'sage' : undefined}>{shared ? 'Coloc' : 'Perso'}</Pill></td>
                     <td>{c.split_mode}</td>
                     <td>Le {c.day_of_month}</td>
-                    <td className="muted small">{users.display(c.payer_user_id)}</td>
+                    <td className="muted small">
+                      {c.payer_user_id === null ? 'Compte joint' : users.display(c.payer_user_id)}
+                    </td>
                     <td className="r num">{eur(c.total_amount)}</td>
                     <td className="r num neg display" style={{ fontSize: 17 }}>−{eur(c.my_share)}</td>
                     <td className="r">
@@ -173,16 +177,62 @@ function ChargeModal({
     valid_from: '',
     valid_to: '',
   });
+  const [perUserSplits, setPerUserSplits] = useState<Record<number, string>>(
+    () => Object.fromEntries((existing?.splits ?? []).map((s) => [s.user_id, s.amount])),
+  );
   const [error, setError] = useState<string | null>(null);
+
+  // Charge les membres du compte sélectionné (pour le mode Par utilisateur)
+  const membersQ = useQuery({
+    queryKey: ['account-members', form.account_id],
+    queryFn: async () => (await api.get<AccountMember[]>(`/accounts/${form.account_id}/members`)).data,
+    enabled: !!form.account_id && form.split_mode === 'Par utilisateur',
+  });
+
+  // Quand l'utilisateur passe en mode "Par utilisateur" ou change de compte,
+  // pré-remplir les parts en répartition égale du total si pas encore configuré.
+  const total = num(form.total_amount);
+  const members = membersQ.data ?? [];
+  const allMembersHaveSplit = members.length > 0
+    && members.every((m) => perUserSplits[m.user_id] !== undefined);
+  if (form.split_mode === 'Par utilisateur' && members.length > 0 && !allMembersHaveSplit) {
+    // Pré-remplir une fois — useEffect serait plus propre mais ça marche
+    setTimeout(() => {
+      setPerUserSplits((prev) => {
+        const next = { ...prev };
+        let changed = false;
+        const perPerson = total / members.length;
+        for (const m of members) {
+          if (next[m.user_id] === undefined) {
+            next[m.user_id] = perPerson.toFixed(2);
+            changed = true;
+          }
+        }
+        return changed ? next : prev;
+      });
+    }, 0);
+  }
+
+  const sumPerUser = members.reduce((s, m) => s + num(perUserSplits[m.user_id] || '0'), 0);
+  const perUserDelta = total - sumPerUser;
 
   const submit = useMutation({
     mutationFn: async () => {
+      const splitsOverride = form.split_mode === 'Par utilisateur'
+        ? members
+            .map((m) => ({
+              user_id: m.user_id,
+              amount: perUserSplits[m.user_id] || '0',
+            }))
+            .filter((x) => num(x.amount) > 0)
+        : undefined;
       const body = {
         ...form,
         total_amount: form.total_amount || '0',
         split_value: form.split_value || null,
         valid_from: form.valid_from || null,
         valid_to: form.valid_to || null,
+        ...(splitsOverride ? { splits_override: splitsOverride } : {}),
       };
       if (isEdit && existing) {
         await api.patch(`/charges/${existing.id}`, body);
@@ -237,6 +287,42 @@ function ChargeModal({
             <Input type="number" step="0.01" value={form.split_value}
               onChange={(e) => setForm({ ...form, split_value: e.target.value })} />
           </Field>
+        )}
+        {form.split_mode === 'Par utilisateur' && (
+          <div style={{ marginTop: 8 }}>
+            <div className="small muted" style={{ marginBottom: 6 }}>
+              Saisis la part de chaque membre du compte joint. La charge sera payée
+              depuis ce compte, chacun abonde via virement.
+            </div>
+            {membersQ.isLoading && <Loader />}
+            {!form.account_id && (
+              <ErrorBox message="Sélectionne un compte d'abord." />
+            )}
+            {members.length === 0 && form.account_id && !membersQ.isLoading && (
+              <ErrorBox message="Ce compte n'a pas de membre — ajoute des co-titulaires d'abord depuis la page Comptes." />
+            )}
+            {members.map((m) => (
+              <Field key={m.user_id} label={m.display_name || m.ha_username}>
+                <Input
+                  type="number" step="0.01" min="0"
+                  value={perUserSplits[m.user_id] ?? ''}
+                  onChange={(e) =>
+                    setPerUserSplits({ ...perUserSplits, [m.user_id]: e.target.value })
+                  }
+                />
+              </Field>
+            ))}
+            {members.length > 0 && (
+              <div className="small" style={{
+                marginTop: 6, color: Math.abs(perUserDelta) < 0.01 ? 'var(--sage)' : 'var(--rose)',
+              }}>
+                Somme des parts : {eur(sumPerUser)} / Total : {eur(total)}
+                {Math.abs(perUserDelta) >= 0.01 && (
+                  <> · Écart : {perUserDelta > 0 ? '+' : ''}{eur(perUserDelta)}</>
+                )}
+              </div>
+            )}
+          </div>
         )}
         <Field label="Compte">
           <Select value={form.account_id ?? ''}

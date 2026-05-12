@@ -47,6 +47,10 @@ class SplitMode(str, Enum):
     EGAL = "Égal"
     POURCENTAGE = "Pourcentage"
     MONTANT_FIXE = "Montant fixe"
+    # Par utilisateur : chaque membre du joint a son propre montant configurable.
+    # Le payeur est le compte joint lui-même (l'argent sort du joint vers un
+    # organisme externe), chacun abonde le joint via virement de sa part.
+    PAR_UTILISATEUR = "Par utilisateur"
 
 
 class IncomeType(str, Enum):

@@ -6,6 +6,14 @@ import { eur, num } from '../lib/format';
 import { Button, Pill } from './ui';
 import type { Account, CalendarEvent, EventType, UpcomingResponse } from '../types';
 
+interface ContributionRow {
+  user_id: number;
+  user_name: string;
+  expected: string;
+  actual: string;
+  balance: string;
+}
+
 const MONTHS = ['Janvier','Février','Mars','Avril','Mai','Juin','Juillet','Août','Septembre','Octobre','Novembre','Décembre'];
 
 const TYPE_LABEL: Record<EventType, string> = {
@@ -36,6 +44,17 @@ export function AccountDetailModal({ account, onClose }: Props) {
       (await api.get<UpcomingResponse>('/calendar/upcoming', { params: { days: 365 } })).data,
   });
 
+  const isJoint = account.type === 'Compte joint';
+  const contributions = useQuery({
+    queryKey: ['contributions', account.id, cursor.year, cursor.month],
+    queryFn: async () =>
+      (await api.get<ContributionRow[]>(
+        `/accounts/${account.id}/contributions`,
+        { params: { year: cursor.year, month: cursor.month } },
+      )).data,
+    enabled: isJoint,
+  });
+
   const monthEvents = useMemo(() => {
     return (query.data?.events ?? [])
       .filter((e) => e.account_id === account.id)
@@ -62,21 +81,9 @@ export function AccountDetailModal({ account, onClose }: Props) {
   }
 
   return (
-    <div
-      onClick={onClose}
-      style={{
-        position: 'fixed', inset: 0, background: 'rgba(28,25,23,0.5)',
-        display: 'flex', alignItems: 'center', justifyContent: 'center',
-        padding: 16, zIndex: 100,
-      }}
-    >
-      <div
-        onClick={(e) => e.stopPropagation()}
-        style={{
-          background: 'var(--bg-elev)', border: '1px solid var(--line)',
-          borderRadius: 'var(--radius-lg)', padding: 24,
-          width: 'min(720px, 100%)', maxHeight: '90vh', overflowY: 'auto',
-        }}
+    <div className="modal-overlay" onClick={onClose}>
+      <div className="modal-content" onClick={(e) => e.stopPropagation()}
+        style={{ width: 'min(720px, 100%)' }}
       >
         <div className="row between" style={{ marginBottom: 12 }}>
           <div>
@@ -119,6 +126,54 @@ export function AccountDetailModal({ account, onClose }: Props) {
             </div>
           </div>
         </div>
+
+        {isJoint && (
+          <div className="card" style={{ padding: 14, marginBottom: 16 }}>
+            <div className="card-title" style={{ marginBottom: 10 }}>
+              Abondements du mois
+            </div>
+            {contributions.isLoading && (
+              <div className="muted small">Chargement…</div>
+            )}
+            {contributions.data && contributions.data.length === 0 && (
+              <div className="muted small">
+                Pas encore de membres sur ce compte joint.
+              </div>
+            )}
+            {contributions.data && contributions.data.length > 0 && (
+              <table className="t">
+                <thead>
+                  <tr>
+                    <th>Membre</th>
+                    <th className="r">Attendu</th>
+                    <th className="r">Versé</th>
+                    <th className="r">Solde</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {contributions.data.map((c) => {
+                    const bal = num(c.balance);
+                    return (
+                      <tr key={c.user_id}>
+                        <td><strong>{c.user_name}</strong></td>
+                        <td className="r num">{eur(c.expected)}</td>
+                        <td className="r num">{eur(c.actual)}</td>
+                        <td className={`r num display ${bal >= 0 ? 'pos' : 'neg'}`}
+                          style={{ fontSize: 16 }}>
+                          {bal >= 0 ? '+' : ''}{eur(bal)}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            )}
+            <p className="small muted" style={{ marginTop: 8, marginBottom: 0 }}>
+              <strong>Attendu</strong> = somme des parts de charges. <strong>Versé</strong> = virements
+              entrants ce mois. Un solde négatif = retard d'abondement.
+            </p>
+          </div>
+        )}
 
         {monthEvents.length === 0 ? (
           <div className="muted small" style={{ padding: 24, textAlign: 'center' }}>

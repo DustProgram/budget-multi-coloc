@@ -12,6 +12,7 @@ from sqlalchemy import or_
 from models.base import get_db
 from models import Account, AccountType, User
 from services.access import accessible_account_ids
+from services.joint_contributions import compute_joint_contributions
 
 router = APIRouter()
 
@@ -120,3 +121,41 @@ async def delete_account(
         raise HTTPException(404, "Compte introuvable")
     db.delete(acc)
     db.commit()
+
+
+class ContributionOut(BaseModel):
+    user_id: int
+    user_name: str
+    expected: Decimal
+    actual: Decimal
+    balance: Decimal
+
+
+@router.get("/{account_id}/contributions", response_model=list[ContributionOut])
+async def get_contributions(
+    account_id: int,
+    request: Request,
+    db: Session = Depends(get_db),
+    year: Optional[int] = None,
+    month: Optional[int] = None,
+):
+    """Pour un compte joint : qui a abondé combien vs sa part attendue ce mois.
+
+    Trié par balance croissante (les plus en retard en premier).
+    """
+    user: User = request.state.user
+    if account_id not in accessible_account_ids(db, user.id):
+        raise HTTPException(404, "Compte introuvable ou non accessible")
+
+    from datetime import date as DateType
+    today = DateType.today()
+    y = year or today.year
+    m = month or today.month
+    rows = compute_joint_contributions(db, account_id, y, m)
+    return [
+        ContributionOut(
+            user_id=r.user_id, user_name=r.user_name,
+            expected=r.expected, actual=r.actual, balance=r.balance,
+        )
+        for r in rows
+    ]

@@ -3,6 +3,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { TrendingUp, Plus, Trash2, Pencil } from 'lucide-react';
 import { api } from '../lib/api';
 import { eur, num } from '../lib/format';
+import { useAutoEdit } from '../lib/useAutoEdit';
 import { useSpaceAccountIdsSet } from '../lib/useSpaceAccounts';
 import { useUsersDirectory } from '../lib/useUsersDirectory';
 import { INCOME_TYPES, type Account, type Income, type IncomeTypeName } from '../types';
@@ -35,6 +36,7 @@ export function Incomes() {
       (i) => i.account_id !== null && spaceAccounts.idsSet.has(i.account_id),
     ),
   };
+  useAutoEdit(allIncomes.data, setEditing);
   const total = incomes.data.reduce((s, i) => s + num(i.amount), 0);
   const accById = new Map((accounts.data ?? []).map((a) => [a.id, a]));
 

@@ -16,14 +16,40 @@ def round2(x: Decimal) -> Decimal:
     return x.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
 
 
-def regenerate_splits(db: Session, charge: Charge) -> list[ChargeSplit]:
+def regenerate_splits(
+    db: Session,
+    charge: Charge,
+    overrides: list[dict] | None = None,
+) -> list[ChargeSplit]:
     """(Re)génère les ChargeSplit d'une charge selon son mode de partage.
 
     Idempotent : supprime les splits existants et les recrée. Ne crée RIEN si :
       - le compte n'a pas de membres (compte solo) → la charge est perso de facto
       - split_mode = PERSO
       - le mode est Pourcentage ou Montant fixe SANS split_value valide
+
+    En mode PAR_UTILISATEUR : `overrides` est une liste de
+    {user_id, amount} qui définit la part exacte de chaque membre. Si
+    `overrides` est None on garde ce qui était déjà en DB (cas d'un update
+    qui ne change pas les parts).
     """
+    if charge.split_mode == SplitMode.PAR_UTILISATEUR:
+        if overrides is None:
+            # Mise à jour partielle : ne touche pas aux splits existants
+            return db.query(ChargeSplit).filter(ChargeSplit.charge_id == charge.id).all()
+        db.query(ChargeSplit).filter(ChargeSplit.charge_id == charge.id).delete()
+        splits: list[ChargeSplit] = []
+        for o in overrides:
+            uid = int(o.get("user_id"))
+            amt = round2(Decimal(str(o.get("amount", 0))))
+            if amt <= 0:
+                continue
+            split = ChargeSplit(charge_id=charge.id, user_id=uid, amount=amt)
+            splits.append(split)
+            db.add(split)
+        db.flush()
+        return splits
+
     # Toujours wipe — chaque appel reflète l'état courant des members + mode
     db.query(ChargeSplit).filter(ChargeSplit.charge_id == charge.id).delete()
 
