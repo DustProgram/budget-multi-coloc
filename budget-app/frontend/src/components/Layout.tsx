@@ -5,6 +5,7 @@ import {
   LayoutDashboard, CalendarDays, CreditCard, TrendingUp, FileText,
   ArrowLeftRight, PiggyBank, ShoppingBag, Calculator, BarChart3,
   ListChecks, Users, ChevronLeft, ChevronRight, Menu, X,
+  Settings as SettingsIcon,
 } from 'lucide-react';
 import { TweaksPanel } from './TweaksPanel';
 import { OfflineBadge } from './OfflineBadge';
@@ -30,6 +31,7 @@ const NAV: NavItem[] = [
   { to: 'coloc', label: 'Récap coloc', icon: Users, section: 'Coloc' },
   { to: 'shopping', label: 'Courses', icon: ListChecks, section: 'Coloc' },
   { to: 'simulator', label: 'Simulateur', icon: Calculator, section: 'Outils' },
+  { to: 'settings', label: 'Réglages', icon: SettingsIcon, section: 'Outils' },
 ];
 
 const SECTIONS: NavItem['section'][] = ['Vue', 'Mouvements', 'Coloc', 'Outils'];

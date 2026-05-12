@@ -94,6 +94,9 @@ class User(Base):
     color_hex = Column(String(7), default="#3B82F6")  # Couleur dans l'UI
     created_at = Column(DateTime, default=datetime.utcnow)
     last_login = Column(DateTime, nullable=True)
+    # Token opt-in pour accès au port externe 8765, sous la responsabilité du user.
+    # Quand présent, autorise l'accès complet à l'app via ?token=… ou Bearer.
+    external_token = Column(String(64), unique=True, nullable=True, index=True)
 
 
 # ============================================================

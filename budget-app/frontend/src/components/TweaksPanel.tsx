@@ -2,14 +2,35 @@ import { useEffect, useState } from 'react';
 import { Sliders, X } from 'lucide-react';
 
 type Theme = 'doux' | 'night' | 'sobre';
+type Font = 'serif' | 'sans';
+type Accent = 'terra' | 'sage' | 'plum' | 'amber';
 
 interface Tweaks {
   theme: Theme;
+  font: Font;
+  accent: Accent;
   animations: boolean;
 }
 
-const DEFAULTS: Tweaks = { theme: 'doux', animations: true };
+const DEFAULTS: Tweaks = {
+  theme: 'doux',
+  font: 'serif',
+  accent: 'terra',
+  animations: true,
+};
 const STORAGE_KEY = 'budget-tweaks';
+
+const FONT_DISPLAY: Record<Font, string> = {
+  serif: "'Instrument Serif', 'EB Garamond', Georgia, serif",
+  sans: "'Geist', 'Inter Tight', -apple-system, system-ui, sans-serif",
+};
+
+const ACCENT_COLORS: Record<Accent, { accent: string; bg: string }> = {
+  terra: { accent: 'oklch(0.62 0.12 40)',  bg: 'oklch(0.94 0.04 50)' },
+  sage:  { accent: 'oklch(0.62 0.08 150)', bg: 'oklch(0.94 0.03 150)' },
+  plum:  { accent: 'oklch(0.55 0.09 320)', bg: 'oklch(0.94 0.03 320)' },
+  amber: { accent: 'oklch(0.78 0.12 80)',  bg: 'oklch(0.94 0.04 80)' },
+};
 
 function load(): Tweaks {
   if (typeof window === 'undefined') return DEFAULTS;
@@ -24,10 +45,18 @@ function load(): Tweaks {
 
 function apply(t: Tweaks) {
   const root = document.documentElement;
-  // 'doux' is the default — no attribute → :root variables apply.
   if (t.theme === 'doux') root.removeAttribute('data-theme');
   else root.setAttribute('data-theme', t.theme);
   root.setAttribute('data-anim', t.animations ? 'on' : 'off');
+  root.style.setProperty('--display', FONT_DISPLAY[t.font]);
+  const c = ACCENT_COLORS[t.accent];
+  root.style.setProperty('--accent', c.accent);
+  // accent-bg is theme-aware in the base CSS; we only override for "doux" (default)
+  if (t.theme === 'doux') {
+    root.style.setProperty('--accent-bg', c.bg);
+  } else {
+    root.style.removeProperty('--accent-bg');
+  }
 }
 
 export function TweaksPanel() {
@@ -98,24 +127,57 @@ export function TweaksPanel() {
               <div className="eyebrow" style={{ marginBottom: 10 }}>Thème</div>
               <div className="grid" style={{ gridTemplateColumns: 'repeat(3, 1fr)', gap: 8 }}>
                 {(['doux', 'night', 'sobre'] as Theme[]).map((t) => (
-                  <button
+                  <Tile
                     key={t}
+                    selected={tweaks.theme === t}
                     onClick={() => setTweaks({ ...tweaks, theme: t })}
-                    style={{
-                      padding: '14px 8px',
-                      borderRadius: 12,
-                      border: tweaks.theme === t ? '2px solid var(--ink)' : '1px solid var(--line)',
-                      background: tweaks.theme === t ? 'var(--bg-sunken)' : 'var(--bg-elev)',
-                      cursor: 'pointer', fontFamily: 'inherit', fontSize: 13,
-                      color: 'var(--ink)',
-                      display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6,
-                    }}
+                    label={t === 'doux' ? 'Doux' : t === 'night' ? 'Nuit' : 'Sobre'}
                   >
                     <ThemePreview theme={t} />
-                    <span style={{ fontWeight: 500 }}>
-                      {t === 'doux' ? 'Doux' : t === 'night' ? 'Nuit' : 'Sobre'}
+                  </Tile>
+                ))}
+              </div>
+            </section>
+
+            <section>
+              <div className="eyebrow" style={{ marginBottom: 10 }}>Police d'affichage</div>
+              <div className="grid" style={{ gridTemplateColumns: '1fr 1fr', gap: 8 }}>
+                {(['serif', 'sans'] as Font[]).map((f) => (
+                  <Tile
+                    key={f}
+                    selected={tweaks.font === f}
+                    onClick={() => setTweaks({ ...tweaks, font: f })}
+                    label={f === 'serif' ? 'Instrument Serif' : 'Geist'}
+                  >
+                    <span style={{
+                      fontFamily: FONT_DISPLAY[f], fontSize: 32, lineHeight: 1,
+                      letterSpacing: '-0.02em', color: 'var(--ink)',
+                    }}>
+                      Aa
                     </span>
-                  </button>
+                  </Tile>
+                ))}
+              </div>
+            </section>
+
+            <section>
+              <div className="eyebrow" style={{ marginBottom: 10 }}>Couleur d'accent</div>
+              <div className="row gap-2">
+                {(['terra', 'sage', 'plum', 'amber'] as Accent[]).map((a) => (
+                  <button
+                    key={a}
+                    onClick={() => setTweaks({ ...tweaks, accent: a })}
+                    title={a}
+                    aria-label={`Accent ${a}`}
+                    style={{
+                      width: 44, height: 44, borderRadius: '50%',
+                      background: ACCENT_COLORS[a].accent,
+                      border: tweaks.accent === a ? '3px solid var(--ink)' : '3px solid var(--bg-elev)',
+                      cursor: 'pointer', outline: 'none',
+                      boxShadow: tweaks.accent === a ? '0 0 0 2px var(--bg-elev)' : 'none',
+                      transition: 'border .15s ease',
+                    }}
+                  />
                 ))}
               </div>
             </section>
@@ -146,6 +208,33 @@ export function TweaksPanel() {
         </div>
       )}
     </>
+  );
+}
+
+function Tile({
+  selected, onClick, label, children,
+}: {
+  selected: boolean;
+  onClick: () => void;
+  label: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <button
+      onClick={onClick}
+      style={{
+        padding: '14px 8px',
+        borderRadius: 12,
+        border: selected ? '2px solid var(--ink)' : '1px solid var(--line)',
+        background: selected ? 'var(--bg-sunken)' : 'var(--bg-elev)',
+        cursor: 'pointer', fontFamily: 'inherit', fontSize: 13,
+        color: 'var(--ink)',
+        display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6,
+      }}
+    >
+      {children}
+      <span style={{ fontWeight: 500 }}>{label}</span>
+    </button>
   );
 }
 

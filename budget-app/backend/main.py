@@ -17,7 +17,8 @@ from apscheduler.triggers.cron import CronTrigger
 from api import (
     accounts, account_members, incomes, charges, charge_splits,
     transfers, savings, purchases, shopping, coloc, simulator, dashboard,
-    health, notifier as notifier_api, calendar as calendar_api,
+    health, notifier as notifier_api, users as users_api,
+    calendar as calendar_api,
 )
 from models.base import init_db
 from services.backup import perform_monthly_backup
@@ -95,6 +96,7 @@ app.include_router(simulator.router, prefix="/api/simulator", tags=["simulator"]
 app.include_router(dashboard.router, prefix="/api/dashboard", tags=["dashboard"])
 app.include_router(calendar_api.router, prefix="/api/calendar", tags=["calendar"])
 app.include_router(notifier_api.router, prefix="/api/notifier", tags=["notifier"])
+app.include_router(users_api.router, prefix="/api/users", tags=["users"])
 
 # ===== Frontend statique (PWA) =====
 static_dir = Path(os.environ.get("STATIC_DIR", "/app/static"))

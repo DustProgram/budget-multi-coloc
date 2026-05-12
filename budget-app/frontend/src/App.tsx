@@ -14,6 +14,7 @@ import { YearlyView } from './pages/YearlyView';
 import { Shopping } from './pages/Shopping';
 import { ColocSummary } from './pages/ColocSummary';
 import { Calendar } from './pages/Calendar';
+import { Settings } from './pages/Settings';
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -49,6 +50,7 @@ export default function App() {
             <Route path="yearly" element={<YearlyView />} />
             <Route path="shopping" element={<Shopping />} />
             <Route path="coloc" element={<ColocSummary />} />
+            <Route path="settings" element={<Settings />} />
           </Route>
         </Routes>
       </BrowserRouter>

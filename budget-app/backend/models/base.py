@@ -62,6 +62,11 @@ def init_db():
 
     Base.metadata.create_all(bind=engine)
 
+    # Migration ad-hoc : ajout de colonnes pour les DB déjà créées par une
+    # ancienne version d'init_db. create_all ne fait pas d'ALTER TABLE.
+    _migrate_add_column_if_missing("users", "external_token", "TEXT")
+    _create_index_if_missing("ix_users_external_token", "users", "external_token", unique=True)
+
     # Créer les paramètres par défaut si table vide
     db = SessionLocal()
     try:
@@ -70,3 +75,22 @@ def init_db():
             db.commit()
     finally:
         db.close()
+
+
+def _migrate_add_column_if_missing(table: str, column: str, sql_type: str) -> None:
+    """Idempotent: ALTER TABLE … ADD COLUMN si la colonne n'existe pas déjà."""
+    from sqlalchemy import text
+    with engine.connect() as conn:
+        rows = conn.execute(text(f"PRAGMA table_info({table})")).fetchall()
+        existing = {r[1] for r in rows}
+        if column not in existing:
+            conn.execute(text(f"ALTER TABLE {table} ADD COLUMN {column} {sql_type}"))
+            conn.commit()
+
+
+def _create_index_if_missing(name: str, table: str, column: str, unique: bool = False) -> None:
+    from sqlalchemy import text
+    u = "UNIQUE " if unique else ""
+    with engine.connect() as conn:
+        conn.execute(text(f"CREATE {u}INDEX IF NOT EXISTS {name} ON {table}({column})"))
+        conn.commit()

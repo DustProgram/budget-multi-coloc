@@ -1,9 +1,17 @@
-"""
-Middleware d'authentification via Home Assistant Ingress.
-HA injecte automatiquement les headers suivants quand un user accède via l'ingress :
-  - X-Remote-User-Id : UUID utilisateur HA
-  - X-Remote-User-Name : nom d'affichage
-  - X-Ingress-Path : préfixe du path
+"""Middleware d'authentification.
+
+Deux modes :
+
+1. **Ingress HA** : le supervisor injecte ``X-Remote-User-Id`` + name.
+   L'user est cherché/créé en DB et attaché à ``request.state.user``.
+2. **Port externe (8765)** : pas de header ingress, le client doit présenter
+   son token via ``?token=<...>`` ou ``Authorization: Bearer <...>``.
+   Le token doit matcher ``User.external_token`` (opt-in par user via
+   /api/users/me/external-token). Avec un token valide, le user a accès
+   complet à l'app — sous sa responsabilité (il a choisi d'exposer son token).
+
+L'ancien mode "modules autorisés sans auth" (``EXTERNAL_MODULES``) est
+toujours actif en fallback pour la rétrocompat avec la config 0.1.x.
 """
 import os
 import logging
@@ -18,17 +26,23 @@ from models import User
 
 logger = logging.getLogger(__name__)
 
+# Servent toujours, sans aucune auth (statut/santé/docs).
 PUBLIC_PATHS = {"/api/health", "/api/docs", "/api/openapi.json"}
 
 
 class HAUserMiddleware(BaseHTTPMiddleware):
-    """Extrait l'utilisateur depuis les headers Ingress HA et le crée si nouveau."""
+    """Extrait l'user depuis ingress HA, ou via token externe."""
 
     async def dispatch(self, request: Request, call_next):
         path = request.url.path
 
-        # Routes publiques
-        if path in PUBLIC_PATHS or path.startswith("/assets/") or path == "/" or not path.startswith("/api/"):
+        # Routes publiques : aucune auth
+        if (
+            path in PUBLIC_PATHS
+            or path.startswith("/assets/")
+            or path == "/"
+            or not path.startswith("/api/")
+        ):
             return await call_next(request)
 
         # Mode dev : user de test
@@ -37,54 +51,72 @@ class HAUserMiddleware(BaseHTTPMiddleware):
             request.state.user = user
             return await call_next(request)
 
-        # Mode externe : limiter aux modules autorisés
-        external_modules = os.environ.get("EXTERNAL_MODULES", "").split(",")
-        is_external = request.headers.get("X-Forwarded-For") and not request.headers.get("X-Remote-User-Id")
-
-        if is_external:
-            # Vérifier que le path correspond à un module autorisé
-            allowed = False
-            for module in external_modules:
-                if module and f"/api/{module.replace('-', '_')}" in path:
-                    allowed = True
-                    break
-                # Adapter : courses -> shopping, coloc-summary -> coloc
-                if module == "courses" and path.startswith("/api/shopping"):
-                    allowed = True
-                elif module == "coloc-summary" and path.startswith("/api/coloc"):
-                    allowed = True
-
-            if not allowed:
-                return JSONResponse(
-                    status_code=403,
-                    content={"detail": "Module non accessible en mode externe"},
-                )
-
-        # Récupération de l'user HA depuis les headers
+        # Headers ingress HA présents → flux nominal
         ha_user_id = request.headers.get("X-Remote-User-Id")
-        ha_username = request.headers.get("X-Remote-User-Name", "Unknown")
-        display_name = request.headers.get("X-Remote-User-Display-Name") or ha_username
+        if ha_user_id:
+            ha_username = request.headers.get("X-Remote-User-Name", "Unknown")
+            display = request.headers.get("X-Remote-User-Display-Name") or ha_username
+            user = self._get_or_create_user(ha_user_id, ha_username, display)
+            request.state.user = user
+            return await call_next(request)
 
-        if not ha_user_id and not is_external:
+        # Sinon → on est sur le port externe (8765). Cherche un token.
+        is_external = bool(request.headers.get("X-Forwarded-For"))
+        token = self._extract_token(request)
+
+        if token:
+            user = self._find_user_by_token(token)
+            if user:
+                request.state.user = user
+                return await call_next(request)
+            return JSONResponse(status_code=401, content={"detail": "Token invalide."})
+
+        # Pas de token → mode "modules autorisés sans auth" (legacy).
+        # Conservé pour compat config v0.1.x. À retirer dans une v0.3 quand
+        # tous les colocs auront migré sur les tokens user.
+        if is_external:
+            allowed_paths = _legacy_external_allowed(request.url.path)
+            if allowed_paths:
+                return await call_next(request)
             return JSONResponse(
                 status_code=401,
-                content={"detail": "Authentification HA requise"},
+                content={
+                    "detail": (
+                        "Auth requise. Ajoute ?token=<ton-token> à l'URL, "
+                        "ou passe par Home Assistant."
+                    ),
+                },
             )
 
-        if ha_user_id:
-            user = self._get_or_create_user(ha_user_id, ha_username, display_name)
-            request.state.user = user
+        # Requête interne sans aucun marker d'auth — refuse.
+        return JSONResponse(
+            status_code=401,
+            content={"detail": "Authentification HA requise."},
+        )
 
-        return await call_next(request)
+    @staticmethod
+    def _extract_token(request: Request) -> Optional[str]:
+        """Récupère un token depuis ``Authorization: Bearer …`` ou ``?token=…``."""
+        auth = request.headers.get("Authorization", "")
+        if auth.lower().startswith("bearer "):
+            return auth[7:].strip() or None
+        qp = request.query_params.get("token")
+        return qp.strip() if qp else None
+
+    @staticmethod
+    def _find_user_by_token(token: str) -> Optional[User]:
+        db = SessionLocal()
+        try:
+            return db.query(User).filter(User.external_token == token).first()
+        finally:
+            db.close()
 
     @staticmethod
     def _get_or_create_user(ha_user_id: str, ha_username: str, display: Optional[str] = None) -> User:
-        """Cherche l'utilisateur ou le crée à la 1ère connexion."""
         db = SessionLocal()
         try:
             user = db.query(User).filter(User.ha_user_id == ha_user_id).first()
             if not user:
-                # 1er user créé = admin par défaut
                 is_first = db.query(User).count() == 0
                 user = User(
                     ha_user_id=ha_user_id,
@@ -95,7 +127,22 @@ class HAUserMiddleware(BaseHTTPMiddleware):
                 db.add(user)
                 db.commit()
                 db.refresh(user)
-                logger.info(f"Nouvel utilisateur créé : {ha_username} (admin={is_first})")
+                logger.info("Nouvel utilisateur créé : %s (admin=%s)", ha_username, is_first)
             return user
         finally:
             db.close()
+
+
+def _legacy_external_allowed(path: str) -> bool:
+    """Compat legacy : EXTERNAL_MODULES=courses,coloc-summary autorise les
+    routes correspondantes même sans token. À supprimer en v0.3."""
+    external_modules = os.environ.get("EXTERNAL_MODULES", "").split(",")
+    for module in external_modules:
+        m = module.strip()
+        if not m:
+            continue
+        if m == "courses" and path.startswith("/api/shopping"):
+            return True
+        if m == "coloc-summary" and path.startswith("/api/coloc"):
+            return True
+    return False
