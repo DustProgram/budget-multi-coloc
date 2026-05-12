@@ -6,6 +6,8 @@ import {
   ArrowLeftRight, PiggyBank, ShoppingBag, Calculator, BarChart3,
   ListChecks, Users, ChevronLeft, ChevronRight, Menu, X,
 } from 'lucide-react';
+import { TweaksPanel } from './TweaksPanel';
+import { OfflineBadge } from './OfflineBadge';
 
 interface NavItem {
   to: string;
@@ -148,6 +150,9 @@ export function Layout() {
           </div>
         </div>
       )}
+
+      <TweaksPanel />
+      <OfflineBadge />
 
       {/* Bottom mobile nav (toggle + few quick links) */}
       <div className="mobile-nav">

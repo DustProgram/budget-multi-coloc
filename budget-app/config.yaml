@@ -36,7 +36,7 @@ ports_description:
 
 # Permissions
 hassio_api: false
-homeassistant_api: false
+homeassistant_api: true     # Envoyer des persistent_notification quand seuil dépassé
 auth_api: true              # Récupérer la liste des users HA
 host_network: false
 host_dbus: true             # Reçoit les événements udev quand on plug/déplug une clé

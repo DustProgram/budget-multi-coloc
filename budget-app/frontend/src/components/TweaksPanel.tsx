@@ -1,0 +1,175 @@
+import { useEffect, useState } from 'react';
+import { Sliders, X } from 'lucide-react';
+
+type Theme = 'doux' | 'night' | 'sobre';
+
+interface Tweaks {
+  theme: Theme;
+  animations: boolean;
+}
+
+const DEFAULTS: Tweaks = { theme: 'doux', animations: true };
+const STORAGE_KEY = 'budget-tweaks';
+
+function load(): Tweaks {
+  if (typeof window === 'undefined') return DEFAULTS;
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    if (!raw) return DEFAULTS;
+    return { ...DEFAULTS, ...JSON.parse(raw) };
+  } catch {
+    return DEFAULTS;
+  }
+}
+
+function apply(t: Tweaks) {
+  const root = document.documentElement;
+  // 'doux' is the default — no attribute → :root variables apply.
+  if (t.theme === 'doux') root.removeAttribute('data-theme');
+  else root.setAttribute('data-theme', t.theme);
+  root.setAttribute('data-anim', t.animations ? 'on' : 'off');
+}
+
+export function TweaksPanel() {
+  const [open, setOpen] = useState(false);
+  const [tweaks, setTweaks] = useState<Tweaks>(load);
+
+  useEffect(() => {
+    apply(tweaks);
+    try { localStorage.setItem(STORAGE_KEY, JSON.stringify(tweaks)); } catch {}
+  }, [tweaks]);
+
+  return (
+    <>
+      <button
+        onClick={() => setOpen(true)}
+        title="Réglages d'affichage"
+        aria-label="Ouvrir les réglages d'affichage"
+        style={{
+          position: 'fixed', bottom: 20, right: 20,
+          width: 44, height: 44, borderRadius: '50%',
+          background: 'var(--bg-elev)', border: '1px solid var(--line)',
+          color: 'var(--ink-2)',
+          display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+          cursor: 'pointer', boxShadow: 'var(--shadow)', zIndex: 5,
+        }}
+      >
+        <Sliders size={18} />
+      </button>
+
+      {open && (
+        <div
+          onClick={() => setOpen(false)}
+          style={{
+            position: 'fixed', inset: 0, background: 'rgba(28,25,23,0.4)',
+            display: 'flex', alignItems: 'flex-end', justifyContent: 'flex-end',
+            zIndex: 50,
+          }}
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            style={{
+              width: 'min(420px, 100%)', height: '100vh',
+              background: 'var(--bg-elev)', borderLeft: '1px solid var(--line)',
+              padding: '24px 28px', display: 'flex', flexDirection: 'column', gap: 22,
+              overflowY: 'auto',
+            }}
+          >
+            <div className="row between">
+              <div>
+                <p className="eyebrow" style={{ margin: 0 }}>Affichage</p>
+                <h2 style={{ fontFamily: 'var(--display)', fontSize: 28, margin: '4px 0 0' }}>Réglages</h2>
+              </div>
+              <button
+                onClick={() => setOpen(false)}
+                aria-label="Fermer"
+                style={{
+                  width: 32, height: 32, borderRadius: 8,
+                  background: 'var(--bg-sunken)', border: '1px solid var(--line)',
+                  display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                  cursor: 'pointer', color: 'var(--ink-3)',
+                }}
+              >
+                <X size={14} />
+              </button>
+            </div>
+
+            <section>
+              <div className="eyebrow" style={{ marginBottom: 10 }}>Thème</div>
+              <div className="grid" style={{ gridTemplateColumns: 'repeat(3, 1fr)', gap: 8 }}>
+                {(['doux', 'night', 'sobre'] as Theme[]).map((t) => (
+                  <button
+                    key={t}
+                    onClick={() => setTweaks({ ...tweaks, theme: t })}
+                    style={{
+                      padding: '14px 8px',
+                      borderRadius: 12,
+                      border: tweaks.theme === t ? '2px solid var(--ink)' : '1px solid var(--line)',
+                      background: tweaks.theme === t ? 'var(--bg-sunken)' : 'var(--bg-elev)',
+                      cursor: 'pointer', fontFamily: 'inherit', fontSize: 13,
+                      color: 'var(--ink)',
+                      display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6,
+                    }}
+                  >
+                    <ThemePreview theme={t} />
+                    <span style={{ fontWeight: 500 }}>
+                      {t === 'doux' ? 'Doux' : t === 'night' ? 'Nuit' : 'Sobre'}
+                    </span>
+                  </button>
+                ))}
+              </div>
+            </section>
+
+            <section>
+              <div className="eyebrow" style={{ marginBottom: 10 }}>Animations</div>
+              <label className="row between" style={{
+                padding: '12px 14px', borderRadius: 12,
+                background: 'var(--bg-sunken)', cursor: 'pointer',
+              }}>
+                <div>
+                  <div style={{ fontWeight: 500 }}>Transitions opt-in</div>
+                  <div className="small muted">Fades, hovers, micro-anims</div>
+                </div>
+                <input
+                  type="checkbox"
+                  checked={tweaks.animations}
+                  onChange={(e) => setTweaks({ ...tweaks, animations: e.target.checked })}
+                  style={{ width: 20, height: 20 }}
+                />
+              </label>
+            </section>
+
+            <div className="small muted" style={{ marginTop: 'auto' }}>
+              Tes préférences sont stockées localement (localStorage).
+            </div>
+          </div>
+        </div>
+      )}
+    </>
+  );
+}
+
+function ThemePreview({ theme }: { theme: Theme }) {
+  const colors: Record<Theme, { bg: string; ink: string; accent: string }> = {
+    doux: { bg: '#faf7f2', ink: '#1c1917', accent: '#c97155' },
+    night: { bg: '#14130f', ink: '#f5f1e8', accent: '#c97155' },
+    sobre: { bg: '#ffffff', ink: '#0a0a0a', accent: '#a3a3a3' },
+  };
+  const c = colors[theme];
+  return (
+    <div style={{
+      width: 56, height: 36, borderRadius: 7,
+      background: c.bg, border: '1px solid var(--line)',
+      position: 'relative', overflow: 'hidden',
+    }}>
+      <span style={{
+        position: 'absolute', top: 4, left: 4, right: 4, height: 4,
+        background: c.ink, borderRadius: 2,
+      }} />
+      <span style={{
+        position: 'absolute', bottom: 4, left: 4, width: 18, height: 6,
+        background: c.accent, borderRadius: 2,
+      }} />
+    </div>
+  );
+}

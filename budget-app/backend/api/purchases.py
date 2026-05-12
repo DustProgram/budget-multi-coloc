@@ -9,7 +9,9 @@ from sqlalchemy import extract
 from sqlalchemy.orm import Session
 
 from models.base import get_db
-from models import Purchase, PaymentMethod, User
+from models import Purchase, PaymentMethod, Settings, User
+from services.budget_calc import compute_monthly_budget
+from services import notifier
 
 router = APIRouter()
 
@@ -97,7 +99,26 @@ async def create_purchase(
     db.add(p)
     db.commit()
     db.refresh(p)
+    _maybe_warn_threshold(db, user)
     return _to_out(p)
+
+
+def _maybe_warn_threshold(db: Session, user: User) -> None:
+    """Si l'achat fait passer la marge sous le seuil → notif HA persistent."""
+    if not notifier.is_ha_available():
+        return
+    settings = db.query(Settings).first()
+    if not settings or not settings.alert_enabled:
+        return
+    today = date.today()
+    budget = compute_monthly_budget(db, user.id, today.year, today.month)
+    threshold = settings.alert_threshold or 0
+    if budget.available_for_purchases < threshold:
+        notifier.low_budget_warning(
+            user.display_name or user.ha_username,
+            budget.available_for_purchases,
+            threshold,
+        )
 
 
 @router.patch("/{purchase_id}", response_model=PurchaseOut)

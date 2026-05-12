@@ -13,9 +13,11 @@ from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from models.base import get_db
-from models import Charge, ChargeSplit, Frequency, SplitMode, User
+from models import Charge, ChargeSplit, Frequency, Settings, SplitMode, User
 from services.access import accessible_account_ids, user_can_write_account
+from services.budget_calc import compute_monthly_budget
 from services.charge_splits import my_share_for_user, regenerate_splits
+from services import notifier
 
 router = APIRouter()
 
@@ -143,6 +145,7 @@ async def create_charge(
     regenerate_splits(db, ch)
     db.commit()
     db.refresh(ch)
+    _maybe_warn_threshold(db, user)
     return _to_out(db, ch, user.id)
 
 
@@ -184,3 +187,26 @@ async def delete_charge(
         raise HTTPException(404, "Charge introuvable")
     db.delete(ch)
     db.commit()
+
+
+def _maybe_warn_threshold(db: Session, user: User) -> None:
+    """Si la marge dispo passe sous le seuil alerte → notif HA persistent.
+
+    No-op silencieuse quand HA n'est pas joignable (mode dev ou SUPERVISOR_TOKEN
+    absent) ou que l'alerte est désactivée dans Settings.
+    """
+    if not notifier.is_ha_available():
+        return
+    settings = db.query(Settings).first()
+    if not settings or not settings.alert_enabled:
+        return
+    from datetime import date
+    today = date.today()
+    budget = compute_monthly_budget(db, user.id, today.year, today.month)
+    threshold = settings.alert_threshold or 0
+    if budget.available_for_purchases < threshold:
+        notifier.low_budget_warning(
+            user.display_name or user.ha_username,
+            budget.available_for_purchases,
+            threshold,
+        )
