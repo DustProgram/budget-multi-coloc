@@ -3,6 +3,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { ShoppingBag, Plus, Trash2, Pencil } from 'lucide-react';
 import { api } from '../lib/api';
 import { eur, fmtDate, todayISO, num } from '../lib/format';
+import { useAutoEdit } from '../lib/useAutoEdit';
 import { useSpaceAccountIdsSet } from '../lib/useSpaceAccounts';
 import { useUsersDirectory } from '../lib/useUsersDirectory';
 import { PAYMENT_METHODS, type Account, type PaymentMethod, type Purchase } from '../types';
@@ -32,6 +33,7 @@ export function Purchases() {
       (p) => p.account_id !== null && spaceAccounts.idsSet.has(p.account_id),
     ),
   };
+  useAutoEdit(allPurchases.data, setEditing);
 
   const remove = useMutation({
     mutationFn: async (id: number) => api.delete(`/purchases/${id}`),

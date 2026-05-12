@@ -3,6 +3,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { FileText, Plus, Trash2, Pencil } from 'lucide-react';
 import { api } from '../lib/api';
 import { eur, num } from '../lib/format';
+import { useAutoEdit } from '../lib/useAutoEdit';
 import { useSpaceAccountIdsSet } from '../lib/useSpaceAccounts';
 import { useUsersDirectory } from '../lib/useUsersDirectory';
 import {
@@ -37,6 +38,7 @@ export function Charges() {
       (c) => c.account_id !== null && spaceAccounts.idsSet.has(c.account_id),
     ),
   };
+  useAutoEdit(allCharges.data, setEditing);
   const myTotal = charges.data.reduce((s, c) => s + num(c.my_share), 0);
 
   const remove = useMutation({

@@ -6,7 +6,7 @@ import {
   LayoutDashboard, CalendarDays, CreditCard, TrendingUp, FileText,
   ArrowLeftRight, PiggyBank, ShoppingBag, Calculator, BarChart3,
   ListChecks, Users, ChevronLeft, ChevronRight, Menu, X, Briefcase,
-  Settings as SettingsIcon,
+  Settings as SettingsIcon, ListOrdered,
 } from 'lucide-react';
 import { TweaksPanel } from './TweaksPanel';
 import { OfflineBadge } from './OfflineBadge';
@@ -26,6 +26,7 @@ interface NavItem {
 const NAV: NavItem[] = [
   { to: 'dashboard', label: 'Tableau de bord', icon: LayoutDashboard, section: 'Vue', colocAllowed: false },
   { to: 'calendar', label: 'Calendrier', icon: CalendarDays, section: 'Vue', colocAllowed: false },
+  { to: 'events', label: 'Événements', icon: ListOrdered, section: 'Vue', colocAllowed: false },
   { to: 'monthly', label: 'Vue mensuelle', icon: BarChart3, section: 'Vue', colocAllowed: false },
   { to: 'yearly', label: 'Vue annuelle', icon: BarChart3, section: 'Vue', colocAllowed: false },
   { to: 'accounts', label: 'Comptes', icon: CreditCard, section: 'Mouvements', colocAllowed: false },

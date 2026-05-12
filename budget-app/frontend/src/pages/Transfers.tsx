@@ -1,4 +1,5 @@
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { ArrowLeftRight, Plus, Trash2, Pencil } from 'lucide-react';
 import { api } from '../lib/api';
@@ -55,6 +56,28 @@ export function Transfers() {
   };
 
   const accById = new Map((accounts.data ?? []).map((a) => [a.id, a]));
+
+  // Auto-ouvre la modal d'édition si query param ?edit=N&editKind=recurring|onetime
+  const [searchParams, setSearchParams] = useSearchParams();
+  const consumed = useRef(false);
+  useEffect(() => {
+    if (consumed.current) return;
+    const editId = Number(searchParams.get('edit'));
+    const kind = searchParams.get('editKind') as 'recurring' | 'onetime' | null;
+    if (!editId || !kind) return;
+    const list = kind === 'recurring' ? allRecurring.data : allOnetime.data;
+    if (!list) return;
+    const found = list.find((x) => x.id === editId);
+    if (found) {
+      consumed.current = true;
+      setEditing({ kind, data: found } as EditingTarget);
+      setTab(kind);
+      const next = new URLSearchParams(searchParams);
+      next.delete('edit');
+      next.delete('editKind');
+      setSearchParams(next, { replace: true });
+    }
+  }, [allRecurring.data, allOnetime.data, searchParams, setSearchParams]);
 
   const remove = useMutation({
     mutationFn: async ({ kind, id }: { kind: 'recurring' | 'onetime'; id: number }) =>
