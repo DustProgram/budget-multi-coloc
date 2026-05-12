@@ -26,6 +26,7 @@ const Settings = lazy(() => import('./pages/Settings').then((m) => ({ default: m
 const ComptaPro = lazy(() => import('./pages/ComptaPro').then((m) => ({ default: m.ComptaPro })));
 const Chat = lazy(() => import('./pages/Chat').then((m) => ({ default: m.Chat })));
 const Events = lazy(() => import('./pages/Events').then((m) => ({ default: m.Events })));
+const ImportPage = lazy(() => import('./pages/Import').then((m) => ({ default: m.Import })));
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -113,6 +114,9 @@ export default function App() {
               } />
               <Route path="chat" element={
                 <Suspense fallback={<PageFallback />}><Chat /></Suspense>
+              } />
+              <Route path="import" element={
+                <Suspense fallback={<PageFallback />}><ImportPage /></Suspense>
               } />
               <Route path="events" element={
                 <Suspense fallback={<PageFallback />}><Events /></Suspense>

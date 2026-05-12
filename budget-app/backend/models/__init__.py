@@ -574,3 +574,36 @@ class ChatAction(Base):
     executed_at = Column(DateTime, nullable=True)
 
     user = relationship("User")
+
+
+# ============================================================
+# Import auto (Claude Vision : tickets, factures, relevés)
+# ============================================================
+
+class ImportBatch(Base):
+    """Session d'import auto. Permet l'undo global d'un import raté."""
+    __tablename__ = "import_batches"
+
+    id = Column(Integer, primary_key=True)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    source_type = Column(String(40), nullable=False)  # 'ticket' | 'invoice' | 'statement'
+    summary = Column(String(240), nullable=True)      # libellé court : "Carrefour 47.32€"
+    raw_response = Column(Text, nullable=True)        # JSON brut renvoyé par Claude (audit)
+    status = Column(String(20), default="committed", nullable=False)
+    # 'committed' : entités créées en DB
+    # 'undone'    : annulé, les entités créées ont été supprimées
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    undone_at = Column(DateTime, nullable=True)
+
+
+class ImportedEntity(Base):
+    """Lien batch → entité concrète créée (Purchase, Charge, OneTimeTransfer…)."""
+    __tablename__ = "imported_entities"
+
+    id = Column(Integer, primary_key=True)
+    batch_id = Column(
+        Integer, ForeignKey("import_batches.id", ondelete="CASCADE"),
+        nullable=False, index=True,
+    )
+    entity_type = Column(String(40), nullable=False)  # 'purchase' | 'charge' | 'onetime_transfer'
+    entity_id = Column(Integer, nullable=False)
