@@ -30,6 +30,11 @@ class SplitOut(BaseModel):
     settled_at: Optional[str] = None
 
 
+class SplitOverride(BaseModel):
+    user_id: int
+    amount: Decimal
+
+
 class ChargeCreate(BaseModel):
     label: str
     total_amount: Decimal
@@ -45,6 +50,8 @@ class ChargeCreate(BaseModel):
     is_active: bool = True
     valid_from: Optional[DateType] = None
     valid_to: Optional[DateType] = None
+    # En mode PAR_UTILISATEUR : montant de chaque membre du joint
+    splits_override: Optional[list[SplitOverride]] = None
 
 
 class ChargeUpdate(BaseModel):
@@ -62,6 +69,7 @@ class ChargeUpdate(BaseModel):
     is_active: Optional[bool] = None
     valid_from: Optional[DateType] = None
     valid_to: Optional[DateType] = None
+    splits_override: Optional[list[SplitOverride]] = None
 
 
 class ChargeOut(BaseModel):
@@ -79,7 +87,9 @@ class ChargeOut(BaseModel):
     notes: Optional[str]
     is_active: bool
     my_share: Decimal
-    payer_user_id: int
+    # null quand la charge est payée par le compte joint (organisme externe) :
+    # le payeur n'est pas un user mais le compte joint lui-même
+    payer_user_id: Optional[int] = None
     splits: list[SplitOut] = []
     valid_from: Optional[DateType] = None
     valid_to: Optional[DateType] = None
@@ -89,7 +99,14 @@ class ChargeOut(BaseModel):
 
 
 def _to_out(db: Session, charge: Charge, user_id: int) -> ChargeOut:
+    from services.access import is_joint_account
     splits = db.query(ChargeSplit).filter(ChargeSplit.charge_id == charge.id).all()
+    # Sur compte joint en mode partagé : payeur = compte joint, pas un user
+    is_external_paid = (
+        charge.split_mode != SplitMode.PERSO
+        and charge.account_id is not None
+        and is_joint_account(db, charge.account_id)
+    )
     return ChargeOut(
         id=charge.id,
         label=charge.label,
@@ -105,7 +122,7 @@ def _to_out(db: Session, charge: Charge, user_id: int) -> ChargeOut:
         notes=charge.notes,
         is_active=charge.is_active,
         my_share=my_share_for_user(db, charge, user_id),
-        payer_user_id=charge.user_id,
+        payer_user_id=None if is_external_paid else charge.user_id,
         valid_from=charge.valid_from,
         valid_to=charge.valid_to,
         splits=[
@@ -148,10 +165,16 @@ async def create_charge(
     if payload.account_id and not user_can_write_account(db, user.id, payload.account_id):
         raise HTTPException(403, "Pas le droit d'écrire sur ce compte")
 
-    ch = Charge(**payload.model_dump(), user_id=user.id)
+    data = payload.model_dump()
+    overrides_raw = data.pop("splits_override", None)
+    overrides = (
+        [{"user_id": o["user_id"], "amount": o["amount"]} for o in overrides_raw]
+        if overrides_raw else None
+    )
+    ch = Charge(**data, user_id=user.id)
     db.add(ch)
     db.flush()
-    regenerate_splits(db, ch)
+    regenerate_splits(db, ch, overrides)
     db.commit()
     db.refresh(ch)
     _maybe_warn_threshold(db, user)
@@ -176,10 +199,16 @@ async def update_charge(
         if ch.user_id != user.id:
             raise HTTPException(403, "Modification réservée aux co-titulaires du compte.")
 
-    for k, v in payload.model_dump(exclude_unset=True).items():
+    data = payload.model_dump(exclude_unset=True)
+    overrides_raw = data.pop("splits_override", None)
+    overrides = (
+        [{"user_id": o["user_id"], "amount": o["amount"]} for o in overrides_raw]
+        if overrides_raw else None
+    )
+    for k, v in data.items():
         setattr(ch, k, v)
     db.flush()
-    regenerate_splits(db, ch)
+    regenerate_splits(db, ch, overrides)
     db.commit()
     db.refresh(ch)
     return _to_out(db, ch, user.id)
