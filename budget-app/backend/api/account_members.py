@@ -13,6 +13,7 @@ from sqlalchemy.orm import Session
 from models import Account, AccountMember, AccountMemberRole, User, Charge
 from models.base import get_db
 from services.access import account_member_user_ids
+from services.bulk_loaders import bulk_users
 from services.charge_splits import regenerate_splits
 
 router = APIRouter()
@@ -68,9 +69,15 @@ async def list_members(
     if user.id not in member_ids:
         raise HTTPException(403, "Pas membre de ce compte")
 
+    # Bulk-load tous les users concernés en 1 requête
+    member_rows = db.query(AccountMember).filter(
+        AccountMember.account_id == account_id,
+    ).all()
+    all_user_ids = {acc.user_id, *(m.user_id for m in member_rows)}
+    users = bulk_users(db, all_user_ids)
+
     out: list[MemberOut] = []
-    # Owner d'origine (Account.user_id) ajouté en tête
-    owner = db.query(User).filter(User.id == acc.user_id).first()
+    owner = users.get(acc.user_id)
     if owner:
         out.append(MemberOut(
             user_id=owner.id,
@@ -80,10 +87,10 @@ async def list_members(
             role=AccountMemberRole.OWNER.value,
             joined_at=owner.created_at,
         ))
-    for m in db.query(AccountMember).filter(AccountMember.account_id == account_id).all():
+    for m in member_rows:
         if m.user_id == acc.user_id:
             continue
-        u = db.query(User).filter(User.id == m.user_id).first()
+        u = users.get(m.user_id)
         if u:
             out.append(MemberOut(
                 user_id=u.id,

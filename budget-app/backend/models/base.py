@@ -79,6 +79,30 @@ def init_db():
     # SQLite ne supporte pas ALTER COLUMN — il faut recréer la table.
     _migrate_messages_account_id_nullable()
 
+    # ── Indexes additionnels α1 (latence) ──────────────────────────────
+    # Composite : récupérer les messages d'un foyer triés par date sans full scan
+    _create_index_if_missing(
+        "ix_messages_household_created",
+        "messages", "household_id, created_at",
+    )
+    # Composite : list_charges filtre par account_id + day_of_month (calendrier)
+    _create_index_if_missing("ix_charges_account_day", "charges", "account_id, day_of_month")
+    # Incomes : list par compte
+    _create_index_if_missing("ix_incomes_account", "incomes", "account_id")
+    # Transfers : list par compte source/dest
+    _create_index_if_missing("ix_rec_transfers_source", "recurring_transfers", "source_account_id")
+    _create_index_if_missing("ix_rec_transfers_dest", "recurring_transfers", "dest_account_id")
+    _create_index_if_missing("ix_ot_transfers_source", "onetime_transfers", "source_account_id")
+    _create_index_if_missing("ix_ot_transfers_dest", "onetime_transfers", "dest_account_id")
+    # AutoSaving : list par source/dest
+    _create_index_if_missing("ix_savings_source", "auto_savings", "source_account_id")
+    _create_index_if_missing("ix_savings_dest", "auto_savings", "dest_account_id")
+    # Custom events : list par date range + filtre user/account
+    _create_index_if_missing("ix_custom_events_date_user", "custom_events", "date, user_id")
+    _create_index_if_missing("ix_custom_events_account", "custom_events", "account_id")
+    # AccountMember : filtré par user_id pour accessible_account_ids
+    _create_index_if_missing("ix_account_members_user", "account_members", "user_id")
+
     # Créer les paramètres par défaut si table vide
     db = SessionLocal()
     try:
