@@ -15,6 +15,7 @@ from sqlalchemy.orm import Session
 from models import Message, MessageRead, User
 from models.base import get_db
 from services.access import account_member_user_ids
+from services.bulk_loaders import bulk_users, display_name
 
 router = APIRouter()
 
@@ -56,19 +57,16 @@ async def list_messages(
         .limit(limit)
         .all()
     )
-    rows.reverse()  # affichage chronologique ascendant côté client
-    out: list[MessageOut] = []
-    user_cache: dict[int, User] = {}
-    for m in rows:
-        u = user_cache.get(m.user_id) or db.query(User).filter(User.id == m.user_id).first()
-        if u:
-            user_cache[m.user_id] = u
-        out.append(MessageOut(
+    rows.reverse()
+    users = bulk_users(db, [m.user_id for m in rows])
+    return [
+        MessageOut(
             id=m.id, user_id=m.user_id,
-            user_name=(u.display_name or u.ha_username) if u else None,
+            user_name=display_name(users.get(m.user_id)),
             body=m.body, created_at=m.created_at,
-        ))
-    return out
+        )
+        for m in rows
+    ]
 
 
 @router.post("/{account_id}/messages", response_model=MessageOut, status_code=201)

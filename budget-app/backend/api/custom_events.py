@@ -15,6 +15,7 @@ from sqlalchemy.orm import Session
 from models import Account, AccountMember, CustomEvent, CustomEventKind, User
 from models.base import get_db
 from services.access import accessible_account_ids
+from services.bulk_loaders import bulk_users, display_name
 
 router = APIRouter()
 
@@ -52,11 +53,12 @@ class EventOut(BaseModel):
         from_attributes = True
 
 
-def _to_out(db: Session, ev: CustomEvent) -> EventOut:
-    user = db.query(User).filter(User.id == ev.user_id).first()
+def _to_out(db: Session, ev: CustomEvent, user_cache: Optional[dict[int, User]] = None) -> EventOut:
+    user = (user_cache or {}).get(ev.user_id) if user_cache is not None else \
+        db.query(User).filter(User.id == ev.user_id).first()
     return EventOut(
         id=ev.id, user_id=ev.user_id,
-        user_name=(user.display_name or user.ha_username) if user else None,
+        user_name=display_name(user),
         date=ev.date, label=ev.label,
         kind=ev.kind.value if hasattr(ev.kind, "value") else ev.kind,
         description=ev.description,
@@ -84,7 +86,9 @@ async def list_events(
         q = q.filter(CustomEvent.date >= from_date)
     if to_date:
         q = q.filter(CustomEvent.date <= to_date)
-    return [_to_out(db, ev) for ev in q.order_by(CustomEvent.date).all()]
+    events = q.order_by(CustomEvent.date).all()
+    user_cache = bulk_users(db, [ev.user_id for ev in events])
+    return [_to_out(db, ev, user_cache) for ev in events]
 
 
 @router.post("/", response_model=EventOut, status_code=201)

@@ -21,6 +21,7 @@ from models import (
     Household, HouseholdMember, HouseholdMessageRead, Message, User,
 )
 from models.base import get_db
+from services.bulk_loaders import bulk_users, display_name
 
 router = APIRouter()
 
@@ -83,9 +84,10 @@ def _my_household(db: Session, user_id: int) -> Optional[Household]:
 
 def _shape(db: Session, h: Household) -> HouseholdOut:
     members_rows = db.query(HouseholdMember).filter(HouseholdMember.household_id == h.id).all()
+    users = bulk_users(db, [m.user_id for m in members_rows])
     members: list[MemberOut] = []
     for m in members_rows:
-        u = db.query(User).filter(User.id == m.user_id).first()
+        u = users.get(m.user_id)
         if u:
             members.append(MemberOut(
                 user_id=u.id,
@@ -237,18 +239,15 @@ async def list_messages(
         .all()
     )
     rows.reverse()
-    out: list[MessageOut] = []
-    user_cache: dict[int, User] = {}
-    for m in rows:
-        u = user_cache.get(m.user_id) or db.query(User).filter(User.id == m.user_id).first()
-        if u:
-            user_cache[m.user_id] = u
-        out.append(MessageOut(
+    users = bulk_users(db, [m.user_id for m in rows])
+    return [
+        MessageOut(
             id=m.id, user_id=m.user_id,
-            user_name=(u.display_name or u.ha_username) if u else None,
+            user_name=display_name(users.get(m.user_id)),
             body=m.body, created_at=m.created_at,
-        ))
-    return out
+        )
+        for m in rows
+    ]
 
 
 @router.post("/me/messages", response_model=MessageOut, status_code=201)
