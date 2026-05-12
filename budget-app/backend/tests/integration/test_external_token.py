@@ -34,23 +34,16 @@ def user(client):
 
 
 def test_generate_and_revoke_token(client, user):
-    """Le user peut générer son token via l'ingress puis le révoquer."""
+    """Le user peut toujours générer/révoquer son token legacy via l'ingress
+    (endpoints conservés deprecated en 0.4 pour la rétrocompat)."""
     r = client.post("/api/users/me/external-token")
     assert r.status_code == 200
     token = r.json()["token"]
     assert len(token) > 30  # 32 octets URL-safe → ~43 chars
 
-    # /me indique maintenant has_external_token=True
-    r = client.get("/api/users/me")
-    assert r.status_code == 200
-    assert r.json()["has_external_token"] is True
-
     # Revoke
     r = client.delete("/api/users/me/external-token")
     assert r.status_code == 204
-
-    r = client.get("/api/users/me")
-    assert r.json()["has_external_token"] is False
 
 
 def test_external_request_with_valid_token(client, user, monkeypatch):
@@ -89,16 +82,8 @@ def test_external_request_with_bad_token(client, monkeypatch):
     assert r.status_code == 401, r.text
 
 
-def test_external_legacy_modules_still_work(client, monkeypatch):
-    """Compat 0.1.x : si EXTERNAL_MODULES=courses, /api/shopping passe sans token."""
-    monkeypatch.setenv("DEV_MODE", "false")
-    monkeypatch.setenv("EXTERNAL_MODULES", "courses,coloc-summary")
-    r = client.get(
-        "/api/shopping/",
-        headers={"X-Forwarded-For": "1.2.3.4"},
-    )
-    # 200 si le user est implicite (mais shopping list_items ne lit pas request.state.user)
-    assert r.status_code == 200, r.text
+# NB : Compat EXTERNAL_MODULES sans auth a été retirée en 0.4 — remplacée
+# par les comptes externes (username + password + scope coloc/full).
 
 
 def test_bearer_header_also_works(client, monkeypatch):

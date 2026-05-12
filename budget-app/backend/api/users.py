@@ -1,12 +1,13 @@
-"""API utilisateur courant : profil, gestion du token d'accès externe."""
+"""API utilisateur courant : profil + mode pro + compte externe."""
 from typing import Optional
 
-from fastapi import APIRouter, Depends, Request
-from pydantic import BaseModel
+from fastapi import APIRouter, Depends, HTTPException, Request
+from pydantic import BaseModel, field_validator
 from sqlalchemy.orm import Session
 
 from models.base import get_db
-from models import User
+from models import ExternalCredential, ExternalScope, User
+from services.external_auth import hash_password
 from services.tokens import generate_external_token
 
 router = APIRouter()
@@ -18,7 +19,9 @@ class MeOut(BaseModel):
     display_name: Optional[str]
     color_hex: str
     is_admin: bool
-    has_external_token: bool
+    has_external_account: bool
+    external_username: Optional[str] = None
+    external_scope: Optional[str] = None
     pro_enabled: bool
 
 
@@ -26,27 +29,50 @@ class ProToggle(BaseModel):
     enabled: bool
 
 
-class TokenOut(BaseModel):
-    token: str
-    note: str = (
-        "Garde ce token secret — quiconque y a accès peut piloter ton compte "
-        "via le port externe 8765 sans passer par Home Assistant. Si tu le "
-        "perds, régénère-le pour invalider l'ancien."
-    )
+class ExternalAccountPayload(BaseModel):
+    username: str
+    password: str
+    scope: ExternalScope = ExternalScope.FULL
+
+    @field_validator("username")
+    @classmethod
+    def _username_clean(cls, v: str) -> str:
+        v = v.strip()
+        if len(v) < 3:
+            raise ValueError("Username trop court (min 3).")
+        if len(v) > 64:
+            raise ValueError("Username trop long (max 64).")
+        if not all(c.isalnum() or c in "_-." for c in v):
+            raise ValueError("Username : lettres/chiffres/._- uniquement.")
+        return v
+
+    @field_validator("password")
+    @classmethod
+    def _password_len(cls, v: str) -> str:
+        if len(v) < 8:
+            raise ValueError("Mot de passe trop court (min 8 caractères).")
+        return v
 
 
-@router.get("/me", response_model=MeOut)
-async def get_me(request: Request):
-    user: User = request.state.user
+def _to_me_out(db: Session, user: User) -> MeOut:
+    cred = db.query(ExternalCredential).filter(ExternalCredential.user_id == user.id).first()
     return MeOut(
         user_id=user.id,
         ha_username=user.ha_username,
         display_name=user.display_name,
         color_hex=user.color_hex,
         is_admin=user.is_admin,
-        has_external_token=user.external_token is not None,
+        has_external_account=cred is not None,
+        external_username=cred.username if cred else None,
+        external_scope=(cred.scope.value if cred and hasattr(cred.scope, "value") else None),
         pro_enabled=bool(user.pro_enabled),
     )
+
+
+@router.get("/me", response_model=MeOut)
+async def get_me(request: Request, db: Session = Depends(get_db)):
+    user: User = request.state.user
+    return _to_me_out(db, user)
 
 
 @router.post("/me/pro-enabled", response_model=MeOut)
@@ -55,31 +81,71 @@ async def set_pro_enabled(
     request: Request,
     db: Session = Depends(get_db),
 ):
-    """Active ou désactive le mode professionnel (auto-entrepreneur).
-
-    Quand actif, l'UI affiche le switcher Perso/Pro dans la sidebar et la
-    rubrique Compta-pro devient accessible. Les données existantes ne sont
-    pas affectées — seul l'affichage change.
-    """
     user_id = request.state.user.id
     user = db.get(User, user_id)
     user.pro_enabled = payload.enabled
     db.commit()
     db.refresh(user)
-    return MeOut(
-        user_id=user.id,
-        ha_username=user.ha_username,
-        display_name=user.display_name,
-        color_hex=user.color_hex,
-        is_admin=user.is_admin,
-        has_external_token=user.external_token is not None,
-        pro_enabled=bool(user.pro_enabled),
+    return _to_me_out(db, user)
+
+
+@router.put("/me/external-account", response_model=MeOut)
+async def upsert_external_account(
+    payload: ExternalAccountPayload,
+    request: Request,
+    db: Session = Depends(get_db),
+):
+    """Crée ou met à jour le compte externe (username + password + scope).
+    Si username déjà pris par un autre user → 409.
+    """
+    user_id = request.state.user.id
+    other = db.query(ExternalCredential).filter(
+        ExternalCredential.username == payload.username,
+        ExternalCredential.user_id != user_id,
+    ).first()
+    if other:
+        raise HTTPException(409, "Ce username est déjà utilisé par un autre compte.")
+
+    cred = db.query(ExternalCredential).filter(ExternalCredential.user_id == user_id).first()
+    if cred is None:
+        cred = ExternalCredential(
+            user_id=user_id,
+            username=payload.username,
+            password_hash=hash_password(payload.password),
+            scope=payload.scope,
+        )
+        db.add(cred)
+    else:
+        cred.username = payload.username
+        cred.password_hash = hash_password(payload.password)
+        cred.scope = payload.scope
+
+    db.commit()
+    user = db.get(User, user_id)
+    return _to_me_out(db, user)
+
+
+@router.delete("/me/external-account", status_code=204)
+async def delete_external_account(request: Request, db: Session = Depends(get_db)):
+    user_id = request.state.user.id
+    db.query(ExternalCredential).filter(ExternalCredential.user_id == user_id).delete()
+    db.commit()
+
+
+# ============================================================
+# Compat 0.3.x — anciens endpoints token (retournent une dépréciation)
+# ============================================================
+
+class TokenOut(BaseModel):
+    token: str
+    deprecated: str = (
+        "Le système de token est remplacé par les comptes externes "
+        "(username + password + scope). Utilise PUT /api/users/me/external-account."
     )
 
 
-@router.post("/me/external-token", response_model=TokenOut)
-async def generate_token(request: Request, db: Session = Depends(get_db)):
-    """(Re)génère le token d'accès externe. L'ancien est invalidé."""
+@router.post("/me/external-token", response_model=TokenOut, deprecated=True)
+async def legacy_generate_token(request: Request, db: Session = Depends(get_db)):
     user_id = request.state.user.id
     user = db.get(User, user_id)
     user.external_token = generate_external_token()
@@ -88,9 +154,8 @@ async def generate_token(request: Request, db: Session = Depends(get_db)):
     return TokenOut(token=user.external_token)
 
 
-@router.delete("/me/external-token", status_code=204)
-async def revoke_token(request: Request, db: Session = Depends(get_db)):
-    """Révoque le token : plus aucun accès externe possible pour ce user."""
+@router.delete("/me/external-token", status_code=204, deprecated=True)
+async def legacy_revoke_token(request: Request, db: Session = Depends(get_db)):
     user_id = request.state.user.id
     user = db.get(User, user_id)
     user.external_token = None

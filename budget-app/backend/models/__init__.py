@@ -77,6 +77,16 @@ class AccountMemberRole(str, Enum):
     VIEWER = "viewer"
 
 
+class ExternalScope(str, Enum):
+    """Niveau d'accès d'un compte externe sur le port 8765.
+
+    - 'coloc' : liste de courses, chat, récap coloc uniquement
+    - 'full'  : accès complet à l'app (équivalent ingress HA)
+    """
+    COLOC = "coloc"
+    FULL = "full"
+
+
 class CustomEventKind(str, Enum):
     PERSO = "perso"          # rappel personnel (médecin, rendez-vous)
     COLOC = "coloc"          # événement partagé (apéro, ménage)
@@ -401,17 +411,25 @@ class CustomEvent(Base):
 # ============================================================
 
 class Message(Base):
-    """Message posté sur un compte joint, visible à tous ses membres."""
+    """Message posté sur un compte joint OU un foyer (household).
+
+    Au moins l'un des deux scope (account_id ou household_id) doit être
+    renseigné. Permet de garder l'ancien chat par compte joint tout en
+    introduisant un chat global au foyer (référence privilégiée à partir
+    de 0.4).
+    """
     __tablename__ = "messages"
 
     id = Column(Integer, primary_key=True)
-    account_id = Column(Integer, ForeignKey("accounts.id", ondelete="CASCADE"), nullable=False, index=True)
+    account_id = Column(Integer, ForeignKey("accounts.id", ondelete="CASCADE"), nullable=True, index=True)
+    household_id = Column(Integer, ForeignKey("households.id", ondelete="CASCADE"), nullable=True, index=True)
     user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
     body = Column(Text, nullable=False)
     created_at = Column(DateTime, default=datetime.utcnow, index=True)
 
     user = relationship("User")
     account = relationship("Account")
+    household = relationship("Household")
 
 
 class MessageRead(Base):
@@ -422,3 +440,67 @@ class MessageRead(Base):
     user_id = Column(Integer, ForeignKey("users.id"), primary_key=True)
     account_id = Column(Integer, ForeignKey("accounts.id", ondelete="CASCADE"), primary_key=True)
     last_read_at = Column(DateTime, default=datetime.utcnow)
+
+
+# ============================================================
+# Foyer (household) — groupe de coloc explicite
+# ============================================================
+
+class Household(Base):
+    """Un foyer (coloc, famille…). Liste explicite de qui vit avec qui.
+    Sert d'ancrage pour la liste de courses partagée, le chat global et
+    plus tard les charges réparties auto par défaut entre tous les membres."""
+    __tablename__ = "households"
+
+    id = Column(Integer, primary_key=True)
+    name = Column(String(128), nullable=False)
+    created_by_user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    members = relationship("HouseholdMember", back_populates="household",
+                            cascade="all, delete-orphan")
+
+
+class HouseholdMember(Base):
+    __tablename__ = "household_members"
+
+    household_id = Column(Integer, ForeignKey("households.id", ondelete="CASCADE"), primary_key=True)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), primary_key=True)
+    joined_at = Column(DateTime, default=datetime.utcnow)
+
+    household = relationship("Household", back_populates="members")
+    user = relationship("User")
+
+
+class HouseholdMessageRead(Base):
+    """Pointeur de lecture du chat foyer par user."""
+    __tablename__ = "household_message_reads"
+
+    user_id = Column(Integer, ForeignKey("users.id"), primary_key=True)
+    household_id = Column(Integer, ForeignKey("households.id", ondelete="CASCADE"), primary_key=True)
+    last_read_at = Column(DateTime, default=datetime.utcnow)
+
+
+# ============================================================
+# Comptes externes (port 8765) avec username + password
+# ============================================================
+
+class ExternalCredential(Base):
+    """Credentials d'accès au port externe (8765) sans passer par HA.
+
+    Un user HA peut créer son compte externe avec username + password
+    (hashé bcrypt) et choisir un scope d'accès. Pratique pour partager
+    un accès limité à un coloc ('coloc' = courses + chat seulement)
+    ou pour soi-même un accès complet hors LAN.
+    """
+    __tablename__ = "external_credentials"
+
+    id = Column(Integer, primary_key=True)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), unique=True, nullable=False)
+    username = Column(String(64), unique=True, nullable=False, index=True)
+    password_hash = Column(String(255), nullable=False)
+    scope = Column(SQLEnum(ExternalScope), default=ExternalScope.FULL, nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    last_login_at = Column(DateTime, nullable=True)
+
+    user = relationship("User")

@@ -1,21 +1,21 @@
 """API d'auth pour le port externe.
 
-Endpoints publics (avant que le middleware n'authentifie quoi que ce soit) :
-- GET  /api/auth/login/users   → liste des users HA enregistrés avec
-                                 indication de qui a un token externe.
-                                 Sert à peupler la page de login externe.
-- POST /api/auth/login/verify  → vérifie un token et renvoie le user
-                                 correspondant. Permet au frontend de
-                                 confirmer le token avant de l'utiliser.
+Public (avant le middleware d'auth) :
+- GET  /api/auth/login/users      → liste users HA + flag has_external_account
+- POST /api/auth/login/password   → username + password → cookie session + payload
 """
+from datetime import datetime
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Response
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
-from models import User
+from models import ExternalCredential, ExternalScope, User
 from models.base import get_db
+from services.external_auth import (
+    COOKIE_NAME, COOKIE_MAX_AGE, make_session_cookie, verify_password,
+)
 
 router = APIRouter()
 
@@ -25,51 +25,78 @@ class LoginUserEntry(BaseModel):
     display_name: str
     ha_username: str
     color_hex: str
-    has_external_token: bool
+    has_external_account: bool
+    external_username: Optional[str] = None
 
 
-class VerifyPayload(BaseModel):
-    token: str
+class PasswordLoginPayload(BaseModel):
+    username: str
+    password: str
 
 
-class VerifyOut(BaseModel):
+class LoginOut(BaseModel):
     user_id: int
     display_name: str
-    ha_username: str
+    scope: str
 
 
 @router.get("/users", response_model=list[LoginUserEntry])
 async def list_users_for_login(db: Session = Depends(get_db)):
-    """Liste les users HA connus, utile pour afficher 'connectez-vous comme…'.
+    """Liste les users HA enregistrés avec flag 'compte externe configuré'.
 
-    Le token n'est jamais retourné — l'user doit l'avoir noté lors de sa
-    génération via l'ingress HA.
+    Affiche aussi le username externe choisi par chacun, pour qu'on sache
+    avec quel login se connecter.
     """
+    out: list[LoginUserEntry] = []
     users = db.query(User).order_by(User.display_name, User.ha_username).all()
-    return [
-        LoginUserEntry(
+    for u in users:
+        cred = db.query(ExternalCredential).filter(ExternalCredential.user_id == u.id).first()
+        out.append(LoginUserEntry(
             user_id=u.id,
             display_name=u.display_name or u.ha_username,
             ha_username=u.ha_username,
             color_hex=u.color_hex,
-            has_external_token=u.external_token is not None,
-        )
-        for u in users
-    ]
+            has_external_account=cred is not None,
+            external_username=cred.username if cred else None,
+        ))
+    return out
 
 
-@router.post("/verify", response_model=VerifyOut)
-async def verify_token(payload: VerifyPayload, db: Session = Depends(get_db)):
-    """Vérifie un token et renvoie le user correspondant. Si invalide → 401."""
-    if not payload.token or not payload.token.strip():
-        raise HTTPException(401, "Token manquant.")
-    user: Optional[User] = (
-        db.query(User).filter(User.external_token == payload.token.strip()).first()
+@router.post("/password", response_model=LoginOut)
+async def login_with_password(
+    payload: PasswordLoginPayload,
+    response: Response,
+    db: Session = Depends(get_db),
+):
+    """Vérifie username + password et installe un cookie session signé."""
+    cred: Optional[ExternalCredential] = (
+        db.query(ExternalCredential)
+        .filter(ExternalCredential.username == payload.username.strip())
+        .first()
     )
+    if not cred or not verify_password(payload.password, cred.password_hash):
+        raise HTTPException(401, "Identifiants invalides.")
+
+    cred.last_login_at = datetime.utcnow()
+    db.commit()
+
+    user = db.query(User).filter(User.id == cred.user_id).first()
     if not user:
-        raise HTTPException(401, "Token invalide.")
-    return VerifyOut(
+        raise HTTPException(500, "Utilisateur sous-jacent introuvable.")
+
+    scope_value = cred.scope.value if hasattr(cred.scope, "value") else str(cred.scope)
+    cookie = make_session_cookie(cred.user_id, scope_value)
+    response.set_cookie(
+        key=COOKIE_NAME,
+        value=cookie,
+        max_age=COOKIE_MAX_AGE,
+        httponly=True,
+        samesite="lax",
+        secure=False,           # HA est généralement en HTTP local
+        path="/",
+    )
+    return LoginOut(
         user_id=user.id,
         display_name=user.display_name or user.ha_username,
-        ha_username=user.ha_username,
+        scope=scope_value,
     )

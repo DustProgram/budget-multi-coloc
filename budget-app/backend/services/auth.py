@@ -1,17 +1,21 @@
 """Middleware d'authentification.
 
-Deux modes :
+Trois modes :
 
-1. **Ingress HA** : le supervisor injecte ``X-Remote-User-Id`` + name.
+1. **Ingress HA** : header ``X-Remote-User-Id`` (injecté par le supervisor).
    L'user est cherché/créé en DB et attaché à ``request.state.user``.
-2. **Port externe (8765)** : pas de header ingress, le client doit présenter
-   son token via ``?token=<...>`` ou ``Authorization: Bearer <...>``.
-   Le token doit matcher ``User.external_token`` (opt-in par user via
-   /api/users/me/external-token). Avec un token valide, le user a accès
-   complet à l'app — sous sa responsabilité (il a choisi d'exposer son token).
+   Scope implicite : 'full'.
 
-L'ancien mode "modules autorisés sans auth" (``EXTERNAL_MODULES``) est
-toujours actif en fallback pour la rétrocompat avec la config 0.1.x.
+2. **Port externe (8765) avec compte externe** : cookie ``budget_session``
+   posé après login via ``POST /api/auth/login/password``. Le cookie est
+   signé HMAC et contient ``{user_id, scope}``. Le middleware filtre les
+   chemins API selon le scope ('coloc' = courses+chat+récap, 'full' = tout).
+
+3. **Mode dev** : env ``DEV_MODE=true`` → user de test 'DevUser'.
+
+Le legacy token externe (User.external_token) est conservé silencieusement
+pour les URLs déjà partagées, mais le système recommandé est désormais
+le compte externe (username + password).
 """
 import os
 import logging
@@ -22,27 +26,28 @@ from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.responses import JSONResponse
 
 from models.base import SessionLocal
-from models import User
+from models import ExternalScope, User
+from services.external_auth import (
+    COOKIE_NAME, read_session_cookie, is_path_allowed_for_scope,
+)
 
 logger = logging.getLogger(__name__)
 
-# Servent toujours, sans aucune auth (statut/santé/docs/login).
 PUBLIC_PATHS_PREFIX = (
     "/api/health",
     "/api/docs",
     "/api/openapi.json",
-    "/api/auth/login",          # login externe : liste users + verify token
+    "/api/auth/login",          # login externe : liste users + password
+    "/api/auth/logout",         # logout — toujours public (clear cookie)
 )
 PUBLIC_PATHS = set(PUBLIC_PATHS_PREFIX)
 
 
 class HAUserMiddleware(BaseHTTPMiddleware):
-    """Extrait l'user depuis ingress HA, ou via token externe."""
-
     async def dispatch(self, request: Request, call_next):
         path = request.url.path
 
-        # Routes publiques : aucune auth (match exact OU préfixe)
+        # Routes publiques : aucune auth
         is_public_api = path in PUBLIC_PATHS or any(
             path.startswith(p + "/") for p in PUBLIC_PATHS_PREFIX
         )
@@ -58,54 +63,55 @@ class HAUserMiddleware(BaseHTTPMiddleware):
         if os.environ.get("DEV_MODE") == "true":
             user = self._get_or_create_user("dev-user-id", "DevUser", display="Dev User")
             request.state.user = user
+            request.state.scope = ExternalScope.FULL.value
             return await call_next(request)
 
-        # Headers ingress HA présents → flux nominal
+        # 1) Headers ingress HA présents → flux nominal, scope 'full'
         ha_user_id = request.headers.get("X-Remote-User-Id")
         if ha_user_id:
             ha_username = request.headers.get("X-Remote-User-Name", "Unknown")
             display = request.headers.get("X-Remote-User-Display-Name") or ha_username
             user = self._get_or_create_user(ha_user_id, ha_username, display)
             request.state.user = user
+            request.state.scope = ExternalScope.FULL.value
             return await call_next(request)
 
-        # Sinon → on est sur le port externe (8765). Cherche un token.
-        is_external = bool(request.headers.get("X-Forwarded-For"))
-        token = self._extract_token(request)
+        # 2) Cookie session externe ?
+        cookie = request.cookies.get(COOKIE_NAME)
+        session = read_session_cookie(cookie) if cookie else None
+        if session:
+            user = self._find_user(session.get("user_id"))
+            scope = session.get("scope", ExternalScope.FULL.value)
+            if user and is_path_allowed_for_scope(path, scope):
+                request.state.user = user
+                request.state.scope = scope
+                return await call_next(request)
+            if user and not is_path_allowed_for_scope(path, scope):
+                return JSONResponse(
+                    status_code=403,
+                    content={"detail": f"Scope '{scope}' insuffisant pour {path}."},
+                )
 
+        # 3) Legacy : Bearer/?token sur l'ancien User.external_token (compat 0.3.x)
+        token = self._extract_legacy_token(request)
         if token:
-            user = self._find_user_by_token(token)
+            user = self._find_user_by_legacy_token(token)
             if user:
                 request.state.user = user
+                request.state.scope = ExternalScope.FULL.value
                 return await call_next(request)
-            return JSONResponse(status_code=401, content={"detail": "Token invalide."})
 
-        # Pas de token → mode "modules autorisés sans auth" (legacy).
-        # Conservé pour compat config v0.1.x. À retirer dans une v0.3 quand
-        # tous les colocs auront migré sur les tokens user.
-        if is_external:
-            allowed_paths = _legacy_external_allowed(request.url.path)
-            if allowed_paths:
-                return await call_next(request)
-            return JSONResponse(
-                status_code=401,
-                content={
-                    "detail": (
-                        "Auth requise. Ajoute ?token=<ton-token> à l'URL, "
-                        "ou passe par Home Assistant."
-                    ),
-                },
-            )
-
-        # Requête interne sans aucun marker d'auth — refuse.
+        # Pas d'auth → 401 (le frontend redirige vers la page login)
         return JSONResponse(
             status_code=401,
-            content={"detail": "Authentification HA requise."},
+            content={
+                "detail": "Authentification requise.",
+                "hint": "Connecte-toi via Home Assistant (ingress) ou via /api/auth/login/password.",
+            },
         )
 
     @staticmethod
-    def _extract_token(request: Request) -> Optional[str]:
-        """Récupère un token depuis ``Authorization: Bearer …`` ou ``?token=…``."""
+    def _extract_legacy_token(request: Request) -> Optional[str]:
         auth = request.headers.get("Authorization", "")
         if auth.lower().startswith("bearer "):
             return auth[7:].strip() or None
@@ -113,7 +119,17 @@ class HAUserMiddleware(BaseHTTPMiddleware):
         return qp.strip() if qp else None
 
     @staticmethod
-    def _find_user_by_token(token: str) -> Optional[User]:
+    def _find_user(user_id: Optional[int]) -> Optional[User]:
+        if not user_id:
+            return None
+        db = SessionLocal()
+        try:
+            return db.query(User).filter(User.id == user_id).first()
+        finally:
+            db.close()
+
+    @staticmethod
+    def _find_user_by_legacy_token(token: str) -> Optional[User]:
         db = SessionLocal()
         try:
             return db.query(User).filter(User.external_token == token).first()
@@ -140,18 +156,3 @@ class HAUserMiddleware(BaseHTTPMiddleware):
             return user
         finally:
             db.close()
-
-
-def _legacy_external_allowed(path: str) -> bool:
-    """Compat legacy : EXTERNAL_MODULES=courses,coloc-summary autorise les
-    routes correspondantes même sans token. À supprimer en v0.3."""
-    external_modules = os.environ.get("EXTERNAL_MODULES", "").split(",")
-    for module in external_modules:
-        m = module.strip()
-        if not m:
-            continue
-        if m == "courses" and path.startswith("/api/shopping"):
-            return True
-        if m == "coloc-summary" and path.startswith("/api/coloc"):
-            return True
-    return False

@@ -9,7 +9,6 @@ import {
 } from '../components/ui';
 import { Avatar } from '../components/Avatar';
 import { ColocChat } from '../components/ColocChat';
-import type { Account } from '../types';
 
 const MONTHS = ['Janvier','Février','Mars','Avril','Mai','Juin','Juillet','Août','Septembre','Octobre','Novembre','Décembre'];
 
@@ -26,11 +25,8 @@ export function ColocSummary() {
     queryKey: ['charges'],
     queryFn: async () => (await api.get<Charge[]>('/charges/')).data,
   });
-  // Pour la discussion : trouver le 1er compte joint accessible (≥ 2 membres)
-  const accounts = useQuery({
-    queryKey: ['accounts'],
-    queryFn: async () => (await api.get<Account[]>('/accounts/')).data,
-  });
+  // Le chat est désormais lié au foyer (configurable dans Réglages),
+  // pas à un compte joint spécifique.
 
   function shift(delta: number) {
     const d = new Date(cursor.year, cursor.month - 1 + delta, 1);
@@ -146,16 +142,10 @@ export function ColocSummary() {
         </div>
       )}
 
-      {/* Discussion sur le compte joint (1er trouvé) */}
-      {(() => {
-        const joint = (accounts.data ?? []).find((a) => a.type === 'Compte joint')
-          ?? (accounts.data ?? [])[0];
-        return joint ? (
-          <div style={{ marginBottom: 24 }}>
-            <ColocChat accountId={joint.id} />
-          </div>
-        ) : null;
-      })()}
+      {/* Discussion du foyer (configurée dans Réglages → Mon foyer) */}
+      <div style={{ marginBottom: 24 }}>
+        <ColocChat />
+      </div>
 
       {/* Charges partagées du mois avec settle */}
       {data && data.charges_lines.length > 0 && (

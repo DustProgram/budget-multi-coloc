@@ -59,6 +59,8 @@ def init_db():
         RecurringTransfer, OneTimeTransfer, AutoSaving, Purchase,
         ShoppingItem, Settings, ShoppingCategory,
         CustomEvent, Message, MessageRead,
+        ExternalCredential,
+        Household, HouseholdMember, HouseholdMessageRead,
     )
 
     Base.metadata.create_all(bind=engine)
@@ -70,6 +72,11 @@ def init_db():
     _migrate_add_column_if_missing("users", "pro_enabled", "BOOLEAN DEFAULT 0")
     _migrate_add_column_if_missing("accounts", "space", "VARCHAR(8) DEFAULT 'perso' NOT NULL")
     _create_index_if_missing("ix_accounts_space", "accounts", "space")
+    # household_id sur messages (nullable, ancien chat par compte conservé)
+    _migrate_add_column_if_missing("messages", "household_id", "INTEGER")
+    _create_index_if_missing("ix_messages_household_id", "messages", "household_id")
+    # account_id devient nullable (geste manuel impossible côté SQLite, on
+    # ne touche pas — les anciens messages restent attachés à un account_id).
 
     # Créer les paramètres par défaut si table vide
     db = SessionLocal()

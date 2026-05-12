@@ -1,30 +1,26 @@
 import { useEffect, useState, type ReactNode } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from './api';
-import { isExternalContext, getExternalToken, clearExternalToken } from './external-auth';
+import { isExternalContext, hasLoggedFlag, clearLoggedFlag } from './external-auth';
 import { ExternalLogin } from '../pages/ExternalLogin';
 
-/** Sur le port externe : vérifie qu'un token valide existe avant de monter
- *  l'app. En cas de 401 sur un endpoint protégé, repasse en mode login. */
 export function AuthGate({ children }: { children: ReactNode }) {
   const external = isExternalContext();
   const qc = useQueryClient();
   const [showLogin, setShowLogin] = useState(false);
 
-  // Essaye de lire le user actuel ; si OK → app ; si 401 → login.
+  // Si on n'a jamais loggé sur ce navigateur, va direct sur Login (évite
+  // un round-trip 401 inutile).
+  useEffect(() => {
+    if (external && !hasLoggedFlag()) setShowLogin(true);
+  }, [external]);
+
   const me = useQuery({
     queryKey: ['me-gate'],
     queryFn: async () => (await api.get('/users/me')).data,
-    enabled: external,
+    enabled: external && !showLogin,
     retry: false,
   });
-
-  useEffect(() => {
-    if (!external) return;
-    if (!getExternalToken()) {
-      setShowLogin(true);
-    }
-  }, [external]);
 
   useEffect(() => {
     function onAuthRequired() { setShowLogin(true); }
@@ -32,7 +28,6 @@ export function AuthGate({ children }: { children: ReactNode }) {
     return () => window.removeEventListener('budget:external-auth-required', onAuthRequired);
   }, []);
 
-  // Pas en mode externe (ingress HA) : on monte direct, l'auth est gérée par l'ingress.
   if (!external) return <>{children}</>;
 
   if (showLogin || me.isError) {
@@ -61,9 +56,11 @@ export function AuthGate({ children }: { children: ReactNode }) {
   return (
     <>
       {children}
-      <ExternalSessionBadge onLogout={() => {
-        clearExternalToken();
+      <ExternalSessionBadge onLogout={async () => {
+        try { await api.post('/auth/logout/'); } catch {}
+        clearLoggedFlag();
         setShowLogin(true);
+        qc.invalidateQueries();
       }} />
     </>
   );

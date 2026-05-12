@@ -5,37 +5,39 @@ import { api } from '../lib/api';
 import type { Message } from '../types';
 import { Avatar } from './Avatar';
 
-interface Props {
-  accountId: number;
-}
+interface HouseholdLite { id: number; name: string; }
 
-export function ColocChat({ accountId }: Props) {
+export function ColocChat() {
   const qc = useQueryClient();
   const [body, setBody] = useState('');
   const listRef = useRef<HTMLDivElement>(null);
 
+  const household = useQuery({
+    queryKey: ['household'],
+    queryFn: async () => (await api.get<HouseholdLite | null>('/households/me')).data,
+  });
+
   const messages = useQuery({
-    queryKey: ['messages', accountId],
-    queryFn: async () =>
-      (await api.get<Message[]>(`/accounts/${accountId}/messages`)).data,
+    queryKey: ['household-messages'],
+    queryFn: async () => (await api.get<Message[]>('/households/me/messages')).data,
     refetchInterval: 5000,
+    enabled: !!household.data,
   });
 
   const post = useMutation({
     mutationFn: async (text: string) =>
-      api.post(`/accounts/${accountId}/messages`, { body: text }),
+      api.post('/households/me/messages', { body: text }),
     onSuccess: () => {
       setBody('');
-      qc.invalidateQueries({ queryKey: ['messages', accountId] });
+      qc.invalidateQueries({ queryKey: ['household-messages'] });
     },
   });
 
   const markRead = useMutation({
-    mutationFn: async () => api.post(`/accounts/${accountId}/messages/read`),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['unread', accountId] }),
+    mutationFn: async () => api.post('/households/me/messages/read'),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['household-unread'] }),
   });
 
-  // Auto-scroll en bas + mark-read à chaque arrivée de nouveaux messages
   useEffect(() => {
     if (listRef.current) {
       listRef.current.scrollTop = listRef.current.scrollHeight;
@@ -46,12 +48,27 @@ export function ColocChat({ accountId }: Props) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [messages.data?.length]);
 
+  if (!household.data) {
+    return (
+      <div className="card">
+        <div className="card-title row gap-2" style={{ alignItems: 'center', marginBottom: 8 }}>
+          <MessageCircle size={14} />
+          Discussion du foyer
+        </div>
+        <p className="muted small">
+          Crée ton foyer dans <strong>Réglages → Mon foyer</strong> pour activer
+          le chat partagé avec tes coloc.
+        </p>
+      </div>
+    );
+  }
+
   return (
     <div className="card" style={{ display: 'flex', flexDirection: 'column', height: 480 }}>
       <div className="card-head" style={{ marginBottom: 8 }}>
         <div className="card-title row gap-2" style={{ alignItems: 'center' }}>
           <MessageCircle size={14} />
-          Discussion du compte joint
+          Discussion · {household.data.name}
         </div>
         <div className="small muted">
           {(messages.data ?? []).length} message{(messages.data ?? []).length > 1 ? 's' : ''}
@@ -65,7 +82,7 @@ export function ColocChat({ accountId }: Props) {
         {messages.isLoading && <p className="muted small">Chargement…</p>}
         {messages.data && messages.data.length === 0 && (
           <div className="muted small" style={{ textAlign: 'center', padding: 20 }}>
-            Aucun message — démarrez la discussion.
+            Aucun message — démarre la discussion.
           </div>
         )}
         {(messages.data ?? []).map((m) => (
