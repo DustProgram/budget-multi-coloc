@@ -50,18 +50,19 @@ export function MonthlyView() {
     setCursor({ year: d.getFullYear(), month: d.getMonth() + 1 });
   }
 
-  // Set des account_ids qui matchent le filtre courant
+  // Set des account_ids qui matchent le filtre courant.
+  // 'perso' = compte solo (PAS de type "Compte joint"). Un compte que j'ai créé
+  // mais qui est en réalité partagé (type Compte joint) n'est pas perso : il
+  // appartient à tous ses co-titulaires.
   const filteredAccountIds = useMemo(() => {
     const all = accountsQ.data ?? [];
     if (filter === 'all') return new Set(all.map((a) => a.id));
     if (filter === 'perso') {
-      // perso = compte solo (space=perso ET pas joint multi-membres) ; on
-      // approxime simplement par space=perso
-      return new Set(all.filter((a) => a.space === 'perso').map((a) => a.id));
+      return new Set(
+        all.filter((a) => a.type !== 'Compte joint').map((a) => a.id),
+      );
     }
     if (filter === 'joint') {
-      // joint = type "Compte joint" OU compte avec members ≥ 2 (on n'a pas
-      // les members ici sans appel séparé) → on filtre sur le type
       return new Set(all.filter((a) => a.type === 'Compte joint').map((a) => a.id));
     }
     // filter is a specific account id
