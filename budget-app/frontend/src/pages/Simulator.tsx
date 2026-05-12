@@ -8,6 +8,14 @@ import {
   Button, Card, ErrorBox, Field, Input, PageHeader, Select, Kpi,
 } from '../components/ui';
 
+const ACCOUNT_FILTER_OPTIONS = [
+  { value: 'all', label: 'Vue globale (tous comptes)' },
+  { value: 'perso', label: 'Comptes perso uniquement' },
+  { value: 'joint', label: 'Comptes joints uniquement' },
+  { value: 'custom', label: 'Sélection personnalisée…' },
+] as const;
+type AccountFilter = (typeof ACCOUNT_FILTER_OPTIONS)[number]['value'];
+
 const QUICKS = [50, 100, 250, 500, 1000];
 // Seuil de "tight" : si après l'achat le solde fin de mois passe sous ce montant
 // on affiche "Oui, mais…" au lieu de "Oui." franc. Réglable côté user plus tard
@@ -17,7 +25,8 @@ const TIGHT_THRESHOLD = 100;
 export function Simulator() {
   const today = new Date();
   const [amount, setAmount] = useState('120');
-  const [accountId, setAccountId] = useState<number | null>(null);
+  const [filter, setFilter] = useState<AccountFilter>('all');
+  const [customIds, setCustomIds] = useState<Set<number>>(new Set());
   const [installments, setInstallments] = useState(1);
   const [year] = useState(today.getFullYear());
   const [month] = useState(today.getMonth() + 1);
@@ -27,12 +36,27 @@ export function Simulator() {
     queryFn: async () => (await api.get<Account[]>('/accounts/')).data,
   });
 
+  const allAccounts = accounts.data ?? [];
+  // Comptes sur lesquels portera la simulation (vide = vue globale)
+  const selectedAccountIds: number[] = (() => {
+    if (filter === 'all') return [];
+    if (filter === 'perso') return allAccounts.filter((a) => a.type !== 'Compte joint').map((a) => a.id);
+    if (filter === 'joint') return allAccounts.filter((a) => a.type === 'Compte joint').map((a) => a.id);
+    return Array.from(customIds);
+  })();
+
+  const toggleCustom = (id: number) => {
+    const next = new Set(customIds);
+    if (next.has(id)) next.delete(id); else next.add(id);
+    setCustomIds(next);
+  };
+
   const sim = useMutation({
     mutationFn: async () => {
       const monthly = num(amount) / Math.max(1, installments);
       const { data } = await api.post<SimulationResult>('/simulator/', {
         amount: monthly.toFixed(2),
-        account_id: accountId,
+        account_ids: selectedAccountIds.length > 0 ? selectedAccountIds : null,
         year, month,
       });
       return data;
@@ -97,12 +121,11 @@ export function Simulator() {
               ))}
             </div>
             <div className="grid" style={{ gridTemplateColumns: '1fr 1fr', gap: 10 }}>
-              <Field label="Compte">
-                <Select value={accountId ?? ''}
-                  onChange={(e) => setAccountId(e.target.value ? Number(e.target.value) : null)}>
-                  <option value="">Vue globale</option>
-                  {accounts.data?.map((a) => (
-                    <option key={a.id} value={a.id}>{a.name} — {a.bank}</option>
+              <Field label="Portée">
+                <Select value={filter}
+                  onChange={(e) => setFilter(e.target.value as AccountFilter)}>
+                  {ACCOUNT_FILTER_OPTIONS.map((o) => (
+                    <option key={o.value} value={o.value}>{o.label}</option>
                   ))}
                 </Select>
               </Field>
@@ -116,6 +139,43 @@ export function Simulator() {
                 </Select>
               </Field>
             </div>
+            {filter === 'custom' && (
+              <div style={{
+                marginTop: 8, padding: 10,
+                border: '1px solid var(--line)', borderRadius: 8,
+                maxHeight: 200, overflowY: 'auto',
+              }}>
+                <div className="small muted" style={{ marginBottom: 6 }}>
+                  Coche les comptes à inclure dans la simulation :
+                </div>
+                {allAccounts.map((a) => (
+                  <label key={a.id} style={{
+                    display: 'flex', alignItems: 'center', gap: 8,
+                    padding: '4px 0', cursor: 'pointer',
+                  }}>
+                    <input
+                      type="checkbox"
+                      checked={customIds.has(a.id)}
+                      onChange={() => toggleCustom(a.id)}
+                    />
+                    <span style={{ fontSize: 13 }}>
+                      {a.name} <span className="muted small">— {a.bank} · {a.type}</span>
+                    </span>
+                  </label>
+                ))}
+                {customIds.size === 0 && (
+                  <p className="small muted" style={{ marginTop: 6, marginBottom: 0 }}>
+                    Aucun compte sélectionné → vue globale par défaut.
+                  </p>
+                )}
+              </div>
+            )}
+            {(filter === 'perso' || filter === 'joint') && (
+              <p className="small muted" style={{ marginTop: 6 }}>
+                {selectedAccountIds.length} compte{selectedAccountIds.length > 1 ? 's' : ''} dans
+                la simulation.
+              </p>
+            )}
             <Button type="submit" variant="primary" disabled={sim.isPending} style={{ marginTop: 12 }}>
               <Calculator size={14} /> Simuler
             </Button>
