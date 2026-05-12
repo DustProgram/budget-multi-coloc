@@ -10,7 +10,7 @@ import {
 import { Sparkline } from '../components/charts/Sparkline';
 import { Avatar, AvatarStack } from '../components/Avatar';
 import { useSpace } from '../lib/space';
-import { ACCOUNT_TYPES, type Account, type AccountMember, type UserPickerEntry } from '../types';
+import { ACCOUNT_TYPES, type Account, type AccountMember, type Me, type UserPickerEntry } from '../types';
 
 export function Accounts() {
   const qc = useQueryClient();
@@ -138,11 +138,21 @@ function NewAccountModal({ open, onClose, onSaved }: { open: boolean; onClose: (
   const [memberIds, setMemberIds] = useState<number[]>([]);
   const [error, setError] = useState<string | null>(null);
 
-  const available = useQuery({
+  const me = useQuery({
+    queryKey: ['me'],
+    queryFn: async () => (await api.get<Me>('/users/me')).data,
+    enabled: open,
+  });
+  const rawAvailable = useQuery({
     queryKey: ['available-users'],
     queryFn: async () => (await api.get<UserPickerEntry[]>('/accounts/available-users')).data,
     enabled: open,
   });
+  // Le créateur est owner implicite — on ne peut pas l'ajouter comme membre.
+  const available = {
+    ...rawAvailable,
+    data: (rawAvailable.data ?? []).filter((u) => u.user_id !== me.data?.user_id),
+  };
   const household = useQuery({
     queryKey: ['household'],
     queryFn: async () => (await api.get<HouseholdLite | null>('/households/me')).data,
@@ -213,10 +223,11 @@ function NewAccountModal({ open, onClose, onSaved }: { open: boolean; onClose: (
                 <button
                   type="button"
                   onClick={() => {
-                    // Pré-coche tous les membres du foyer (sauf moi, qui suis owner implicite)
+                    // Pré-coche tous les membres du foyer sauf moi (owner implicite)
                     const others = household.data!.members
                       .map((m) => m.user_id)
-                      .filter((id) => (available.data ?? []).some((u) => u.user_id === id));
+                      .filter((id) => id !== me.data?.user_id)
+                      .filter((id) => available.data.some((u) => u.user_id === id));
                     setMemberIds(others);
                   }}
                   className="btn sm"
@@ -225,14 +236,15 @@ function NewAccountModal({ open, onClose, onSaved }: { open: boolean; onClose: (
                 </button>
               )}
             </div>
-            {available.isLoading && <p className="muted small">Chargement…</p>}
-            {available.data && available.data.length === 0 && (
+            {rawAvailable.isLoading && <p className="muted small">Chargement…</p>}
+            {available.data.length === 0 && (
               <p className="muted small">
                 Aucun autre utilisateur HA n'a encore ouvert l'app. Demande-leur
-                de se connecter une fois via HA pour apparaître ici.
+                de se connecter une fois via HA pour apparaître ici. Tu peux
+                créer le compte sans co-titulaires et les ajouter plus tard.
               </p>
             )}
-            {available.data && available.data.length > 0 && (
+            {available.data.length > 0 && (
               <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginBottom: 10 }}>
                 {available.data.map((u) => {
                   const checked = memberIds.includes(u.user_id);

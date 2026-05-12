@@ -75,8 +75,9 @@ def init_db():
     # household_id sur messages (nullable, ancien chat par compte conservé)
     _migrate_add_column_if_missing("messages", "household_id", "INTEGER")
     _create_index_if_missing("ix_messages_household_id", "messages", "household_id")
-    # account_id devient nullable (geste manuel impossible côté SQLite, on
-    # ne touche pas — les anciens messages restent attachés à un account_id).
+    # messages.account_id passe de NOT NULL à nullable (chat foyer en 0.4).
+    # SQLite ne supporte pas ALTER COLUMN — il faut recréer la table.
+    _migrate_messages_account_id_nullable()
 
     # Créer les paramètres par défaut si table vide
     db = SessionLocal()
@@ -104,4 +105,44 @@ def _create_index_if_missing(name: str, table: str, column: str, unique: bool = 
     u = "UNIQUE " if unique else ""
     with engine.connect() as conn:
         conn.execute(text(f"CREATE {u}INDEX IF NOT EXISTS {name} ON {table}({column})"))
+        conn.commit()
+
+
+def _migrate_messages_account_id_nullable() -> None:
+    """Si messages.account_id est encore NOT NULL (DB créée avant 0.4),
+    on recrée la table avec account_id nullable. SQLite ne supporte pas
+    ``ALTER TABLE ... ALTER COLUMN``.
+
+    Idempotent : ne fait rien si la colonne est déjà nullable.
+    """
+    from sqlalchemy import text
+    with engine.connect() as conn:
+        rows = conn.execute(text("PRAGMA table_info(messages)")).fetchall()
+        if not rows:
+            return  # table pas encore créée
+        col = next((r for r in rows if r[1] == "account_id"), None)
+        if col is None or col[3] == 0:
+            return  # déjà nullable
+        # Recréer la table
+        conn.execute(text("PRAGMA foreign_keys=OFF"))
+        conn.execute(text("ALTER TABLE messages RENAME TO _messages_old"))
+        conn.execute(text("""
+            CREATE TABLE messages (
+                id INTEGER PRIMARY KEY,
+                account_id INTEGER REFERENCES accounts(id) ON DELETE CASCADE,
+                household_id INTEGER REFERENCES households(id) ON DELETE CASCADE,
+                user_id INTEGER NOT NULL REFERENCES users(id),
+                body TEXT NOT NULL,
+                created_at DATETIME
+            )
+        """))
+        conn.execute(text("""
+            INSERT INTO messages (id, account_id, household_id, user_id, body, created_at)
+            SELECT id, account_id, household_id, user_id, body, created_at FROM _messages_old
+        """))
+        conn.execute(text("DROP TABLE _messages_old"))
+        conn.execute(text("CREATE INDEX IF NOT EXISTS ix_messages_account_id ON messages(account_id)"))
+        conn.execute(text("CREATE INDEX IF NOT EXISTS ix_messages_household_id ON messages(household_id)"))
+        conn.execute(text("CREATE INDEX IF NOT EXISTS ix_messages_created_at ON messages(created_at)"))
+        conn.execute(text("PRAGMA foreign_keys=ON"))
         conn.commit()
