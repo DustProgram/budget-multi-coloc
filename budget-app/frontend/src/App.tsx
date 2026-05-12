@@ -28,8 +28,22 @@ const ComptaPro = lazy(() => import('./pages/ComptaPro').then((m) => ({ default:
 const queryClient = new QueryClient({
   defaultOptions: {
     queries: {
-      staleTime: 30_000,
+      // Données considérées fraîches 60s : pas de refetch automatique pendant
+      // ce délai (les hooks dans plusieurs composants ne déclenchent qu'une
+      // seule requête réseau). Les composants qui veulent du temps réel
+      // (chat foyer, shopping) le surchargent explicitement avec
+      // refetchInterval / un staleTime court.
+      staleTime: 60_000,
+      // Garde en mémoire 5 min avant garbage collection : retour rapide
+      // entre les onglets sans re-fetch.
+      gcTime: 5 * 60_000,
       retry: 1,
+      // Pas de refetch quand la fenêtre reprend le focus — l'utilisateur
+      // a une connexion permanente et les ressources sont stables (sauf
+      // chat/shopping qui ont leur propre refetchInterval).
+      refetchOnWindowFocus: false,
+      // Ne refetch pas non plus à chaque reconnexion réseau (rare en LAN).
+      refetchOnReconnect: false,
     },
   },
 });
