@@ -6,7 +6,7 @@ import {
   LayoutDashboard, CalendarDays, CreditCard, TrendingUp, FileText,
   ArrowLeftRight, PiggyBank, ShoppingBag, Calculator, BarChart3,
   ListChecks, Users, ChevronLeft, ChevronRight, Menu, X, Briefcase,
-  Settings as SettingsIcon, ListOrdered,
+  Settings as SettingsIcon, Sparkles, ListOrdered, Camera,
 } from 'lucide-react';
 import { TweaksPanel } from './TweaksPanel';
 import { OfflineBadge } from './OfflineBadge';
@@ -18,7 +18,7 @@ interface NavItem {
   to: string;
   label: string;
   icon: LucideIcon;
-  section: 'Vue' | 'Mouvements' | 'Coloc' | 'Outils' | 'Pro';
+  section: 'Vue' | 'Mouvements' | 'Coloc' | 'Outils' | 'Pro' | 'Assistant';
   proOnly?: boolean;
   colocAllowed: boolean;  // visible en scope coloc
 }
@@ -38,11 +38,13 @@ const NAV: NavItem[] = [
   { to: 'coloc', label: 'Récap coloc', icon: Users, section: 'Coloc', colocAllowed: true },
   { to: 'shopping', label: 'Courses', icon: ListChecks, section: 'Coloc', colocAllowed: true },
   { to: 'simulator', label: 'Simulateur', icon: Calculator, section: 'Outils', colocAllowed: false },
+  { to: 'chat', label: 'Assistant IA', icon: Sparkles, section: 'Assistant', colocAllowed: false },
+  { to: 'import', label: 'Import auto', icon: Camera, section: 'Assistant', colocAllowed: false },
   { to: 'settings', label: 'Réglages', icon: SettingsIcon, section: 'Outils', colocAllowed: false },
   { to: 'compta-pro', label: 'Compta-pro', icon: Briefcase, section: 'Pro', proOnly: true, colocAllowed: false },
 ];
 
-const SECTIONS: NavItem['section'][] = ['Vue', 'Mouvements', 'Coloc', 'Pro', 'Outils'];
+const SECTIONS: NavItem['section'][] = ['Vue', 'Mouvements', 'Coloc', 'Pro', 'Assistant', 'Outils'];
 
 export function Layout() {
   const [collapsed, setCollapsed] = useState(false);
