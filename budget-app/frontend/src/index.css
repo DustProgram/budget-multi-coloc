@@ -478,6 +478,31 @@ input, select, textarea { font-family: inherit; font-size: inherit; color: inher
 .hide-mobile { display: initial; }
 .show-mobile { display: none !important; }
 
+/* === Modale === */
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(28, 25, 23, 0.4);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px 16px;
+  z-index: 100;
+  /* dvh = dynamic viewport height : tient compte de la barre URL mobile */
+  height: 100dvh;
+  overflow-y: auto;
+}
+.modal-content {
+  background: var(--bg-elev);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  padding: 24px;
+  max-height: calc(100dvh - 48px);
+  overflow-y: auto;
+  /* Margin auto pour rester centré même quand on scroll dans l'overlay */
+  margin: auto;
+}
+
 /* === Responsive === */
 @media (max-width: 920px) {
   .app { grid-template-columns: 1fr; }
@@ -506,6 +531,15 @@ input, select, textarea { font-family: inherit; font-size: inherit; color: inher
   /* Heat map yearly : reste en 12 cellules mais plus petites */
   .heat { grid-template-columns: repeat(6, 1fr); }
   .heat-cell .v { font-size: 12px; }
+  /* Modale : ancrée en haut (clavier mobile pousse le viewport) */
+  .modal-overlay {
+    align-items: flex-start;
+    padding: 5dvh 12px 16px;
+  }
+  .modal-content {
+    padding: 18px;
+    max-height: calc(100dvh - 7dvh);
+  }
   /* Page header : empile les boutons sous le titre, pas à droite étiré */
   .page-header { flex-direction: column; align-items: stretch; }
   .page-header .row { flex-wrap: wrap; }
