@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { ChevronLeft, ChevronRight, Plus, Trash2, Users as UsersIcon } from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
+import { ChevronLeft, ChevronRight, Plus, Trash2, Users as UsersIcon, Pencil } from 'lucide-react';
 import {
   addMonths, eachDayOfInterval, endOfMonth, endOfWeek, format,
   isSameDay, isSameMonth, startOfMonth, startOfWeek,
@@ -49,6 +50,21 @@ const TYPE_TONE: Record<EventType, 'sage' | 'rose' | 'plum' | 'amber'> = {
 
 const DAYS = ['Lun', 'Mar', 'Mer', 'Jeu', 'Ven', 'Sam', 'Dim'];
 
+// Routes d'édition par source_kind, réutilisées par useAutoEdit
+const EDIT_PATH: Record<string, (id: number) => string> = {
+  income: (id) => `/incomes?edit=${id}`,
+  charge: (id) => `/charges?edit=${id}`,
+  recurring_transfer: (id) => `/transfers?edit=${id}&editKind=recurring`,
+  onetime_transfer: (id) => `/transfers?edit=${id}&editKind=onetime`,
+  saving: (id) => `/savings?edit=${id}`,
+  purchase: (id) => `/purchases?edit=${id}`,
+};
+
+function navigateToEdit(navigate: ReturnType<typeof useNavigate>, kind: string, id: number) {
+  const builder = EDIT_PATH[kind];
+  if (builder) navigate(builder(id));
+}
+
 type FilterKey = 'income' | 'charge' | 'transfer' | 'saving' | 'purchase' | 'custom';
 
 const FILTER_LABELS: Record<FilterKey, string> = {
@@ -70,14 +86,57 @@ function matchesFilter(eventType: EventType | 'custom', enabled: Set<FilterKey>)
   return true;
 }
 
+interface PendingDrop {
+  source_kind: string;
+  source_id: number;
+  original_date: string;
+  label: string;
+  target_date: string;
+}
+
 export function Calendar() {
   const qc = useQueryClient();
+  const navigate = useNavigate();
   const [cursor, setCursor] = useState<Date>(() => new Date());
   const [selected, setSelected] = useState<Date>(() => new Date());
   const [creating, setCreating] = useState(false);
+  const [pendingDrop, setPendingDrop] = useState<PendingDrop | null>(null);
   const [enabledFilters, setEnabledFilters] = useState<Set<FilterKey>>(
     () => new Set(['income', 'charge', 'transfer', 'saving', 'purchase', 'custom']),
   );
+
+  const moveMutation = useMutation({
+    mutationFn: async (drop: PendingDrop) => {
+      const [, , dayStr] = drop.target_date.split('-');
+      const day = parseInt(dayStr, 10);
+      // Récurrents → change day_of_month. Ponctuels → change date.
+      switch (drop.source_kind) {
+        case 'income':
+          return api.patch(`/incomes/${drop.source_id}`, { day_of_month: day });
+        case 'charge':
+          return api.patch(`/charges/${drop.source_id}`, { day_of_month: day });
+        case 'recurring_transfer':
+          return api.patch(`/transfers/recurring/${drop.source_id}`, { day_of_month: day });
+        case 'onetime_transfer':
+          return api.patch(`/transfers/onetime/${drop.source_id}`, { date: drop.target_date });
+        case 'saving':
+          return api.patch(`/savings/${drop.source_id}`, { day_of_month: day });
+        case 'purchase':
+          return api.patch(`/purchases/${drop.source_id}`, { date: drop.target_date });
+        default:
+          throw new Error(`Type non supporté : ${drop.source_kind}`);
+      }
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['calendar'] });
+      qc.invalidateQueries({ queryKey: ['charges'] });
+      qc.invalidateQueries({ queryKey: ['incomes'] });
+      qc.invalidateQueries({ queryKey: ['transfers'] });
+      qc.invalidateQueries({ queryKey: ['savings'] });
+      qc.invalidateQueries({ queryKey: ['purchases'] });
+      setPendingDrop(null);
+    },
+  });
 
   function toggleFilter(k: FilterKey) {
     setEnabledFilters((cur) => {
@@ -232,6 +291,19 @@ export function Calendar() {
                   <button
                     key={format(d, 'yyyy-MM-dd')}
                     onClick={() => setSelected(d)}
+                    onDragOver={(ev) => { ev.preventDefault(); ev.currentTarget.classList.add('drop-target'); }}
+                    onDragLeave={(ev) => { ev.currentTarget.classList.remove('drop-target'); }}
+                    onDrop={(ev) => {
+                      ev.preventDefault();
+                      ev.currentTarget.classList.remove('drop-target');
+                      try {
+                        const raw = ev.dataTransfer.getData('application/json');
+                        if (!raw) return;
+                        const payload = JSON.parse(raw) as Omit<PendingDrop, 'target_date'>;
+                        if (payload.original_date === dKey) return; // même jour, no-op
+                        setPendingDrop({ ...payload, target_date: dKey });
+                      } catch { /* noop */ }
+                    }}
                     className={`cal-day ${isMuted ? 'muted' : ''} ${isToday ? 'today' : ''} ${isSelected ? 'selected' : ''}`}
                   >
                     <span className="d">{format(d, 'd')}</span>
@@ -290,7 +362,18 @@ export function Calendar() {
               </div>
             ))}
             {selectedEvents.map((e, i) => (
-              <div key={i} style={{ padding: '12px 0', borderBottom: '1px solid var(--line)' }}>
+              <div
+                key={i}
+                draggable
+                onDragStart={(ev) => {
+                  ev.dataTransfer.setData('application/json', JSON.stringify({
+                    source_kind: e.source_kind, source_id: e.source_id,
+                    original_date: e.date, label: e.label,
+                  }));
+                  ev.dataTransfer.effectAllowed = 'move';
+                }}
+                style={{ padding: '12px 0', borderBottom: '1px solid var(--line)', cursor: 'grab' }}
+              >
                 <div className="row between">
                   <Pill tone={TYPE_TONE[e.type]}>{TYPE_LABEL[e.type]}</Pill>
                   <span className={`num display ${num(e.amount) >= 0 ? 'pos' : ''}`} style={{ fontSize: 18 }}>
@@ -298,7 +381,15 @@ export function Calendar() {
                   </span>
                 </div>
                 <div style={{ fontWeight: 500, marginTop: 4 }}>{e.label}</div>
-                <div className="small muted">{e.account_name}</div>
+                <div className="row between" style={{ marginTop: 4 }}>
+                  <span className="small muted">{e.account_name}</span>
+                  <Button
+                    variant="sm"
+                    onClick={() => navigateToEdit(navigate, e.source_kind, e.source_id)}
+                  >
+                    <Pencil size={11} /> Modifier
+                  </Button>
+                </div>
               </div>
             ))}
           </Card>
@@ -339,6 +430,42 @@ export function Calendar() {
         defaultDate={format(selected, 'yyyy-MM-dd')}
         onSaved={() => qc.invalidateQueries({ queryKey: ['custom-events'] })}
       />
+
+      {pendingDrop && (
+        <Modal
+          open
+          onClose={() => setPendingDrop(null)}
+          title="Déplacer l'événement"
+        >
+          <p style={{ marginTop: 0 }}>
+            Déplacer <strong>{pendingDrop.label}</strong> du{' '}
+            <strong>{format(new Date(pendingDrop.original_date), 'd MMM yyyy', { locale: fr })}</strong>
+            {' '}au{' '}
+            <strong>{format(new Date(pendingDrop.target_date), 'd MMM yyyy', { locale: fr })}</strong> ?
+          </p>
+          {['income', 'charge', 'recurring_transfer', 'saving'].includes(pendingDrop.source_kind) && (
+            <p className="small muted">
+              C'est un événement récurrent. Le jour du mois sera changé pour
+              <strong> tous les mois</strong>.
+            </p>
+          )}
+          {moveMutation.isError && (
+            <ErrorBox message={
+              moveMutation.error instanceof Error ? moveMutation.error.message : 'Erreur'
+            } />
+          )}
+          <div className="row gap-2" style={{ justifyContent: 'flex-end', marginTop: 16 }}>
+            <Button onClick={() => setPendingDrop(null)}>Annuler</Button>
+            <Button
+              variant="primary"
+              onClick={() => moveMutation.mutate(pendingDrop)}
+              disabled={moveMutation.isPending}
+            >
+              {moveMutation.isPending ? 'Déplacement…' : 'Confirmer'}
+            </Button>
+          </div>
+        </Modal>
+      )}
     </>
   );
 }

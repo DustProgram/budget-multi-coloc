@@ -210,12 +210,32 @@ async def list_upcoming_events(
     # Tri chronologique stable (date, type pour ordre déterministe)
     raw.sort(key=lambda e: (e[0], e[1]))
 
+    # IMPORTANT — modèle abondement (0.9.0) : charges partagées sur compte
+    # joint sont affichées mais ne plombent pas le solde projeté (on assume
+    # que les abondements des colocs équilibrent).
+    from services.access import is_joint_account
+    from models import SplitMode
+    _joint_cache: dict[int, bool] = {}
+    def _is_joint(acc_id):
+        if acc_id is None:
+            return False
+        if acc_id not in _joint_cache:
+            _joint_cache[acc_id] = is_joint_account(db, acc_id)
+        return _joint_cache[acc_id]
+    neutralized_charge_ids = {
+        ch.id for ch in charges
+        if ch.split_mode != SplitMode.PERSO and _is_joint(ch.account_id)
+    }
+
     events: list[CalendarEvent] = []
     for d, evt_type, label, amount, acc_id, src_kind, src_id in raw:
+        # Skip impact balance pour charges neutralisées (joint partagé)
+        is_neutralized_charge = src_kind == "charge" and src_id in neutralized_charge_ids
         if acc_id not in running:
             # Compte inactif ou appartenant à un autre user : on ignore
             continue
-        running[acc_id] += amount
+        if not is_neutralized_charge:
+            running[acc_id] += amount
         events.append(CalendarEvent(
             date=d,
             type=evt_type,
