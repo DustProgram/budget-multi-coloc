@@ -61,11 +61,99 @@ class RateLimitError(LLMError):
     pass
 
 
-DEFAULT_MODELS = {
-    "anthropic": "claude-haiku-4-5-20251001",
-    "openai": "gpt-4o-mini",
-    "gemini": "gemini-2.5-flash",
+# Tous les providers supportés. Pour les providers OpenAI-compatibles
+# (Mistral, Groq, OpenRouter, …) on baked le base_url + un modèle par défaut
+# raisonnable, mais l'utilisateur peut toujours surcharger via llm_model
+# et llm_base_url.
+PROVIDER_PRESETS: dict[str, dict] = {
+    "anthropic": {
+        "adapter": "anthropic",
+        "model": "claude-haiku-4-5-20251001",
+        "base_url": None,
+        "label": "Anthropic Claude",
+    },
+    "openai": {
+        "adapter": "openai",
+        "model": "gpt-4o-mini",
+        "base_url": None,
+        "label": "OpenAI",
+    },
+    "gemini": {
+        "adapter": "gemini",
+        "model": "gemini-2.5-flash",
+        "base_url": None,
+        "label": "Google Gemini",
+    },
+    "mistral": {
+        "adapter": "openai",
+        "model": "mistral-small-latest",
+        "base_url": "https://api.mistral.ai/v1",
+        "label": "Mistral AI",
+    },
+    "groq": {
+        "adapter": "openai",
+        "model": "llama-3.3-70b-versatile",
+        "base_url": "https://api.groq.com/openai/v1",
+        "label": "Groq (Llama fast)",
+    },
+    "openrouter": {
+        "adapter": "openai",
+        "model": "google/gemini-2.0-flash-exp:free",
+        "base_url": "https://openrouter.ai/api/v1",
+        "label": "OpenRouter (multi-modèles)",
+    },
+    "deepseek": {
+        "adapter": "openai",
+        "model": "deepseek-chat",
+        "base_url": "https://api.deepseek.com",
+        "label": "DeepSeek",
+    },
+    "together": {
+        "adapter": "openai",
+        "model": "meta-llama/Llama-3.3-70B-Instruct-Turbo",
+        "base_url": "https://api.together.xyz/v1",
+        "label": "Together AI",
+    },
+    "perplexity": {
+        "adapter": "openai",
+        "model": "sonar-small",
+        "base_url": "https://api.perplexity.ai",
+        "label": "Perplexity",
+    },
+    "fireworks": {
+        "adapter": "openai",
+        "model": "accounts/fireworks/models/llama-v3p3-70b-instruct",
+        "base_url": "https://api.fireworks.ai/inference/v1",
+        "label": "Fireworks AI",
+    },
+    "cerebras": {
+        "adapter": "openai",
+        "model": "llama-3.3-70b",
+        "base_url": "https://api.cerebras.ai/v1",
+        "label": "Cerebras (très rapide)",
+    },
+    "ollama": {
+        "adapter": "openai",
+        "model": "llama3.2",
+        "base_url": "http://localhost:11434/v1",
+        "label": "Ollama (local, gratuit)",
+    },
+    "lmstudio": {
+        "adapter": "openai",
+        "model": "local-model",
+        "base_url": "http://localhost:1234/v1",
+        "label": "LM Studio (local)",
+    },
+    "custom": {
+        "adapter": "openai",
+        "model": "",
+        "base_url": "",
+        "label": "OpenAI-compatible custom",
+    },
 }
+
+# Compat : map provider → modèle par défaut (utilisé partout dans le code legacy)
+DEFAULT_MODELS = {k: v["model"] for k, v in PROVIDER_PRESETS.items() if v["model"]}
 
 
 # ============================================================
@@ -109,10 +197,15 @@ def get_llm_config() -> dict:
 
     if not provider:
         provider = "anthropic"
-    if provider not in DEFAULT_MODELS:
+    if provider not in PROVIDER_PRESETS:
         provider = "anthropic"
+    preset = PROVIDER_PRESETS[provider]
     if not model:
-        model = DEFAULT_MODELS[provider]
+        model = preset["model"] or "gpt-4o-mini"
+    # Si l'user n'a pas spécifié de base_url, on prend celui du preset (le cas
+    # échéant — anthropic/gemini n'en ont pas, openai non plus)
+    if not base_url:
+        base_url = preset["base_url"] or ""
 
     rpm = _safe_int(os.environ.get("LLM_RPM_LIMIT") or opts.get("llm_rpm_limit"))
     tpm = _safe_int(os.environ.get("LLM_TPM_LIMIT") or opts.get("llm_tpm_limit"))
@@ -120,6 +213,7 @@ def get_llm_config() -> dict:
 
     return {
         "provider": provider,
+        "adapter": preset["adapter"],
         "api_key": api_key,
         "model": model,
         "base_url": base_url,
@@ -244,19 +338,23 @@ class LLMClient:
 
 def get_llm_client() -> LLMClient:
     cfg = get_llm_config()
+    # Ollama / LM Studio (local) tolèrent une clé vide — on injecte un placeholder
     if not cfg["api_key"]:
-        raise LLMError(
-            "Aucune clé API LLM configurée. Renseigne llm_api_key dans la config "
-            "de l'add-on (Paramètres > Add-on Budget > Configuration)."
-        )
-    provider = cfg["provider"]
-    if provider == "anthropic":
+        if cfg["provider"] in ("ollama", "lmstudio"):
+            cfg = {**cfg, "api_key": "ollama-local"}
+        else:
+            raise LLMError(
+                "Aucune clé API LLM configurée. Renseigne llm_api_key dans la "
+                "config de l'add-on (Paramètres > Add-on Budget > Configuration)."
+            )
+    adapter = cfg["adapter"]
+    if adapter == "anthropic":
         return AnthropicAdapter(cfg)
-    if provider == "openai":
+    if adapter == "openai":
         return OpenAIAdapter(cfg)
-    if provider == "gemini":
+    if adapter == "gemini":
         return GeminiAdapter(cfg)
-    raise LLMError(f"Provider inconnu : {provider}")
+    raise LLMError(f"Adapter inconnu : {adapter}")
 
 
 # ============================================================

@@ -1,5 +1,5 @@
 name: "Budget Multi-Coloc"
-version: "0.8.2"
+version: "0.8.3"
 slug: "budget_multi_coloc"
 description: "Gestionnaire de budget personnel et colocation avec stockage chiffré"
 url: "https://github.com/DustProgram/budget-multi-coloc/tree/main/budget-app"
@@ -84,14 +84,23 @@ options:
   llm_tpm_limit: 0       # tokens max par minute (input + output)
   llm_rpd_limit: 0       # requêtes max par jour
   # Modèle à utiliser. Laisser vide pour le défaut du provider :
-  #   anthropic → claude-haiku-4-5-20251001
-  #   openai    → gpt-4o-mini
-  #   gemini    → gemini-2.5-flash
+  #   anthropic   → claude-haiku-4-5-20251001
+  #   openai      → gpt-4o-mini
+  #   gemini      → gemini-2.5-flash
+  #   mistral     → mistral-small-latest
+  #   groq        → llama-3.3-70b-versatile
+  #   openrouter  → google/gemini-2.0-flash-exp:free
+  #   deepseek    → deepseek-chat
+  #   together    → meta-llama/Llama-3.3-70B-Instruct-Turbo
+  #   perplexity  → sonar-small
+  #   fireworks   → accounts/fireworks/models/llama-v3p3-70b-instruct
+  #   cerebras    → llama-3.3-70b
+  #   ollama      → llama3.2 (pas de clé requise)
+  #   lmstudio    → local-model (pas de clé requise)
   llm_model: ""
-  # URL custom (utile pour OpenRouter, Groq, Mistral, Ollama local).
-  # Ex OpenRouter : https://openrouter.ai/api/v1
-  # Ex Groq      : https://api.groq.com/openai/v1
-  # Ex Ollama    : http://homeassistant.local:11434/v1
+  # URL de base — laisser vide, sauf si provider=custom OU override d'un preset.
+  # Auto-rempli pour mistral / groq / openrouter / deepseek / together /
+  # perplexity / fireworks / cerebras / ollama / lmstudio.
   llm_base_url: ""
   # Compatibilité ascendante : ancienne option claude_api_key
   claude_api_key: ""
@@ -107,7 +116,7 @@ schema:
     - "list(courses|coloc-summary)"
   default_currency: "list(EUR|USD|GBP|CHF)"
   default_locale: "list(fr_FR|en_US)"
-  llm_provider: "list(anthropic|openai|gemini)"
+  llm_provider: "list(anthropic|openai|gemini|mistral|groq|openrouter|deepseek|together|perplexity|fireworks|cerebras|ollama|lmstudio|custom)"
   llm_api_key: "password?"
   llm_model: "str?"
   llm_base_url: "str?"
