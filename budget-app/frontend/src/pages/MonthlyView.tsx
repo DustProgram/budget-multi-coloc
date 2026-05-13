@@ -38,13 +38,29 @@ export function MonthlyView() {
   const [mode, setMode] = useState<ViewMode>('flux');
 
   const query = useQuery({
-    queryKey: ['upcoming', 'monthly', cursor.year, cursor.month],
+    queryKey: ['upcoming', 'monthly', 1095],
     queryFn: async () =>
-      (await api.get<UpcomingResponse>('/calendar/upcoming', { params: { days: 90 } })).data,
+      (await api.get<UpcomingResponse>('/calendar/upcoming', { params: { days: 1095 } })).data,
   });
   const accountsQ = useQuery({
     queryKey: ['accounts'],
     queryFn: async () => (await api.get<Account[]>('/accounts/')).data,
+  });
+  // Pour le solde cumulé (mode 'compte') on a besoin du delta des mois passés
+  // dans l'année courante. /dashboard/yearly retourne 12 MonthlyBudget.
+  const yearlyQ = useQuery({
+    queryKey: ['dashboard', 'yearly', cursor.year],
+    queryFn: async () =>
+      (await api.get<Array<{
+        month: number;
+        total_initial_balance: string;
+        total_final_balance: string;
+        accounts: Array<{
+          account_id: number;
+          initial_balance: string;
+          final_balance: string;
+        }>;
+      }>>('/dashboard/yearly', { params: { year: cursor.year } })).data,
   });
 
   function shift(delta: number) {
@@ -143,7 +159,20 @@ export function MonthlyView() {
       {query.data && (() => {
         const accs = accountsQ.data ?? [];
         const filteredAccs = accs.filter((a) => filteredAccountIds.has(a.id));
-        const currentBalance = filteredAccs.reduce((s, a) => s + num(a.initial_balance), 0);
+        const baseBalance = filteredAccs.reduce((s, a) => s + num(a.initial_balance), 0);
+        // Cumul des deltas des mois précédents de l'année courante.
+        // Permet d'afficher le VRAI solde au début du mois affiché et pas
+        // juste le solde initial figé en DB.
+        const yearly = yearlyQ.data ?? [];
+        let priorDelta = 0;
+        for (const m of yearly) {
+          if (m.month >= cursor.month) continue;
+          const monthAccs = m.accounts.filter((a) => filteredAccountIds.has(a.account_id));
+          const init = monthAccs.reduce((s, a) => s + num(a.initial_balance), 0);
+          const fin = monthAccs.reduce((s, a) => s + num(a.final_balance), 0);
+          priorDelta += fin - init;
+        }
+        const currentBalance = baseBalance + priorDelta;
         const endBalance = currentBalance + totals.net;
         return (
         <>
