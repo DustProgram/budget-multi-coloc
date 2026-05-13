@@ -28,8 +28,11 @@ export function Simulator() {
   const [filter, setFilter] = useState<AccountFilter>('all');
   const [customIds, setCustomIds] = useState<Set<number>>(new Set());
   const [installments, setInstallments] = useState(1);
-  const [year] = useState(today.getFullYear());
-  const [month] = useState(today.getMonth() + 1);
+  const [yearMonth, setYearMonth] = useState(
+    `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}`,
+  );
+  const year = Number(yearMonth.split('-')[0]);
+  const month = Number(yearMonth.split('-')[1]);
 
   const accounts = useQuery({
     queryKey: ['accounts'],
@@ -139,6 +142,10 @@ export function Simulator() {
                 </Select>
               </Field>
             </div>
+            <Field label="Mois de la simulation">
+              <Input type="month" value={yearMonth}
+                onChange={(e) => setYearMonth(e.target.value)} />
+            </Field>
             {filter === 'custom' && (
               <div style={{
                 marginTop: 8, padding: 10,
