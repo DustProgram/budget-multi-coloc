@@ -153,13 +153,27 @@ def compute_monthly_budget(db: Session, user_id: int, year: int, month: int) -> 
     budget.total_incomes = sum((i.amount for i in incomes), Decimal(0))
 
     # ===== 2. CHARGES (ma part, mois actuel) =====
+    # Setting opt-in : exclure les charges joint partagées de mon budget perso.
+    # Utile quand on assume que les colocs abondent et qu'on ne veut pas voir
+    # un 'déficit' dû à des charges qui seront en réalité couvertes par eux.
+    from models import Settings
+    from services.access import is_joint_account
+    settings = db.query(Settings).first()
+    exclude_joint = settings.exclude_joint_charges_from_personal if settings else False
+
     charges = db.query(Charge).filter(
         Charge.user_id == user_id,
         Charge.is_active.is_(True),
     ).all()
     for charge in charges:
-        if charge_is_active_in_month(charge, month, year):
-            budget.total_charges += compute_my_share(charge)
+        if not charge_is_active_in_month(charge, month, year):
+            continue
+        if (exclude_joint
+                and charge.split_mode != SplitMode.PERSO
+                and charge.account_id
+                and is_joint_account(db, charge.account_id)):
+            continue  # ne pas compter dans ma marge perso
+        budget.total_charges += compute_my_share(charge)
 
     # ===== 3. ÉPARGNE AUTO =====
     savings = db.query(AutoSaving).filter(

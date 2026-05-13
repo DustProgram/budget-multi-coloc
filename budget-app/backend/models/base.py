@@ -102,6 +102,7 @@ def init_db():
     _migrate_add_column_if_missing("settings", "llm_rpm_limit", "INTEGER")
     _migrate_add_column_if_missing("settings", "llm_tpm_limit", "INTEGER")
     _migrate_add_column_if_missing("settings", "llm_rpd_limit", "INTEGER")
+    _migrate_add_column_if_missing("settings", "exclude_joint_charges_from_personal", "BOOLEAN DEFAULT 0 NOT NULL")
 
     # ── Indexes additionnels α1 (latence) ──────────────────────────────
     # Composite : récupérer les messages d'un foyer triés par date sans full scan
