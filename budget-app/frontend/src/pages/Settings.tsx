@@ -78,6 +78,7 @@ export function Settings() {
           <ExternalAccountCard me={me.data} onChanged={() => qc.invalidateQueries({ queryKey: ['me'] })} />
           <ProCard me={me.data} onChanged={() => qc.invalidateQueries({ queryKey: ['me'] })} />
           <NotifCard available={notifier.data?.ha_available ?? false} />
+          {me.data.is_admin && <LLMSettingsCard />}
         </div>
       )}
     </>
@@ -500,3 +501,142 @@ function NotifCard({ available }: { available: boolean }) {
 
 // Force keep unused imports used (for Shield/UserIcon/Lock references in modal-style future expansion)
 void Shield; void UserIcon; void Lock;
+
+// ============================================================
+// LLM Settings — modifier le provider/clé depuis l'UI sans toucher au YAML
+// ============================================================
+
+interface Provider {
+  key: string;
+  label: string;
+  default_model: string;
+  default_base_url: string;
+  needs_api_key: boolean;
+}
+interface LLMSettings {
+  provider: string | null;
+  has_api_key: boolean;
+  model: string | null;
+  base_url: string | null;
+  rpm_limit: number | null;
+  tpm_limit: number | null;
+  rpd_limit: number | null;
+}
+
+function LLMSettingsCard() {
+  const qc = useQueryClient();
+  const providers = useQuery({
+    queryKey: ['chat', 'providers'],
+    queryFn: async () => (await api.get<{ providers: Provider[] }>('/chat/providers')).data.providers,
+  });
+  const current = useQuery({
+    queryKey: ['settings', 'llm'],
+    queryFn: async () => (await api.get<LLMSettings>('/settings/llm')).data,
+  });
+  const [form, setForm] = useState<Partial<LLMSettings & { api_key: string }>>({});
+  const [showKey, setShowKey] = useState(false);
+
+  const save = useMutation({
+    mutationFn: async () => api.patch('/settings/llm', form),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['settings', 'llm'] });
+      qc.invalidateQueries({ queryKey: ['chat', 'status'] });
+      setForm({});
+    },
+  });
+
+  if (current.isLoading || providers.isLoading) return <Card><Loader /></Card>;
+  const cur = current.data;
+  const provs = providers.data ?? [];
+  const v = (k: keyof LLMSettings & string) => {
+    const fv = (form as Record<string, unknown>)[k];
+    if (fv !== undefined) return String(fv ?? '');
+    return String((cur?.[k] ?? '') as string | number);
+  };
+  const selectedProvider = (form.provider ?? cur?.provider ?? '').toString();
+  const preset = provs.find((p) => p.key === selectedProvider);
+
+  return (
+    <Card>
+      <p className="eyebrow">Assistant IA (admin)</p>
+      <h2 style={{ fontFamily: 'var(--display)', fontSize: 26, margin: '4px 0 12px', letterSpacing: '-.01em' }}>
+        Provider LLM
+      </h2>
+      <p className="small muted" style={{ marginTop: 0 }}>
+        Surcharge la config.yaml de l'add-on, prend effet immédiatement. Laisse vide pour utiliser la valeur de l'add-on.
+      </p>
+
+      <Field label="Provider">
+        <Select
+          value={selectedProvider}
+          onChange={(e) => setForm({ ...form, provider: e.target.value })}
+        >
+          <option value="">— Utiliser la valeur de la config.yaml —</option>
+          {provs.map((p) => (
+            <option key={p.key} value={p.key}>{p.label}</option>
+          ))}
+        </Select>
+      </Field>
+
+      {selectedProvider && preset?.needs_api_key && (
+        <Field label={`Clé API ${cur?.has_api_key && form.api_key === undefined ? '(déjà configurée)' : ''}`}>
+          <div className="row gap-2">
+            <Input
+              type={showKey ? 'text' : 'password'}
+              value={form.api_key ?? ''}
+              onChange={(e) => setForm({ ...form, api_key: e.target.value })}
+              placeholder={cur?.has_api_key ? '••••••••••••' : 'sk-...'}
+              style={{ flex: 1 }}
+            />
+            <Button type="button" variant="sm" onClick={() => setShowKey((v) => !v)}>
+              {showKey ? '🙈' : '👁'}
+            </Button>
+          </div>
+        </Field>
+      )}
+
+      <div className="grid" style={{ gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+        <Field label={`Modèle (défaut : ${preset?.default_model || '—'})`}>
+          <Input
+            value={form.model ?? cur?.model ?? ''}
+            onChange={(e) => setForm({ ...form, model: e.target.value })}
+            placeholder={preset?.default_model}
+          />
+        </Field>
+        <Field label="Base URL (custom OpenAI-compat)">
+          <Input
+            value={form.base_url ?? cur?.base_url ?? ''}
+            onChange={(e) => setForm({ ...form, base_url: e.target.value })}
+            placeholder={preset?.default_base_url || ''}
+          />
+        </Field>
+      </div>
+
+      <p className="eyebrow" style={{ marginTop: 14 }}>Limites de quota local (0 = illimité)</p>
+      <div className="grid" style={{ gridTemplateColumns: '1fr 1fr 1fr', gap: 10 }}>
+        <Field label="Req / minute">
+          <Input type="number" min="0" value={v('rpm_limit')}
+            onChange={(e) => setForm({ ...form, rpm_limit: e.target.value ? Number(e.target.value) : 0 })} />
+        </Field>
+        <Field label="Tokens / minute">
+          <Input type="number" min="0" value={v('tpm_limit')}
+            onChange={(e) => setForm({ ...form, tpm_limit: e.target.value ? Number(e.target.value) : 0 })} />
+        </Field>
+        <Field label="Req / jour">
+          <Input type="number" min="0" value={v('rpd_limit')}
+            onChange={(e) => setForm({ ...form, rpd_limit: e.target.value ? Number(e.target.value) : 0 })} />
+        </Field>
+      </div>
+
+      {save.isError && (
+        <ErrorBox message={save.error instanceof Error ? save.error.message : 'Erreur'} />
+      )}
+      <div className="row gap-2" style={{ marginTop: 12, justifyContent: 'flex-end' }}>
+        <Button onClick={() => setForm({})}>Annuler</Button>
+        <Button variant="primary" onClick={() => save.mutate()} disabled={save.isPending || Object.keys(form).length === 0}>
+          {save.isPending ? 'Enregistrement…' : 'Enregistrer'}
+        </Button>
+      </div>
+    </Card>
+  );
+}

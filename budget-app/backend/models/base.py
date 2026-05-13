@@ -84,6 +84,15 @@ def init_db():
         _migrate_add_column_if_missing(tbl, "valid_from", "DATE")
         _migrate_add_column_if_missing(tbl, "valid_to", "DATE")
 
+    # Override LLM dans Settings (0.9.4) — surcharge la config.yaml depuis l'UI
+    _migrate_add_column_if_missing("settings", "llm_provider", "VARCHAR(40)")
+    _migrate_add_column_if_missing("settings", "llm_api_key", "TEXT")
+    _migrate_add_column_if_missing("settings", "llm_model", "VARCHAR(80)")
+    _migrate_add_column_if_missing("settings", "llm_base_url", "VARCHAR(255)")
+    _migrate_add_column_if_missing("settings", "llm_rpm_limit", "INTEGER")
+    _migrate_add_column_if_missing("settings", "llm_tpm_limit", "INTEGER")
+    _migrate_add_column_if_missing("settings", "llm_rpd_limit", "INTEGER")
+
     # ── Indexes additionnels α1 (latence) ──────────────────────────────
     # Composite : récupérer les messages d'un foyer triés par date sans full scan
     _create_index_if_missing(

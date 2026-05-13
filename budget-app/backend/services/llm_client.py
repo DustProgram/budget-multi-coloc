@@ -177,17 +177,59 @@ def _safe_int(v, default=0) -> int:
         return default
 
 
-def get_llm_config() -> dict:
-    """Lit la config LLM depuis env > options HA > défaut.
+def _load_db_settings() -> dict:
+    """Lit la table Settings (un seul row id=1) en SQL brut pour éviter
+    une dépendance sur le modèle SQLAlchemy depuis llm_client.
+    Retourne dict vide si la table n'existe pas encore.
+    """
+    db_path = os.environ.get("DATABASE_URL", "")
+    if db_path.startswith("sqlite:///"):
+        path = db_path.replace("sqlite:///", "").split("?")[0]
+        try:
+            import sqlite3
+            conn = sqlite3.connect(path)
+            cur = conn.cursor()
+            cur.execute("SELECT llm_provider, llm_api_key, llm_model, llm_base_url, "
+                        "llm_rpm_limit, llm_tpm_limit, llm_rpd_limit FROM settings LIMIT 1")
+            row = cur.fetchone()
+            conn.close()
+            if row:
+                return {
+                    "llm_provider": row[0],
+                    "llm_api_key": row[1],
+                    "llm_model": row[2],
+                    "llm_base_url": row[3],
+                    "llm_rpm_limit": row[4],
+                    "llm_tpm_limit": row[5],
+                    "llm_rpd_limit": row[6],
+                }
+        except Exception:
+            pass
+    return {}
 
-    Compat ascendante : si llm_api_key vide mais claude_api_key présent,
-    on bascule en mode 'anthropic' avec cette clé.
+
+def get_llm_config() -> dict:
+    """Priorité : env > settings DB > options HA YAML > défaut.
+
+    DB > YAML permet à l'utilisateur de modifier les paramètres LLM depuis
+    l'UI in-app sans redémarrer l'add-on.
     """
     opts = _load_ha_options()
-    provider = (os.environ.get("LLM_PROVIDER") or opts.get("llm_provider") or "").strip().lower()
-    api_key = (os.environ.get("LLM_API_KEY") or opts.get("llm_api_key") or "").strip()
-    model = (os.environ.get("LLM_MODEL") or opts.get("llm_model") or "").strip()
-    base_url = (os.environ.get("LLM_BASE_URL") or opts.get("llm_base_url") or "").strip()
+    db_settings = _load_db_settings()
+
+    def _pick(env_key: str, db_key: str, yaml_key: str) -> str:
+        env_v = os.environ.get(env_key) or ""
+        if env_v.strip():
+            return env_v.strip()
+        db_v = db_settings.get(db_key) or ""
+        if str(db_v).strip():
+            return str(db_v).strip()
+        return str(opts.get(yaml_key) or "").strip()
+
+    provider = _pick("LLM_PROVIDER", "llm_provider", "llm_provider").lower()
+    api_key = _pick("LLM_API_KEY", "llm_api_key", "llm_api_key")
+    model = _pick("LLM_MODEL", "llm_model", "llm_model")
+    base_url = _pick("LLM_BASE_URL", "llm_base_url", "llm_base_url")
 
     legacy_key = (os.environ.get("CLAUDE_API_KEY") or opts.get("claude_api_key") or "").strip()
     if not api_key and legacy_key:
@@ -207,9 +249,21 @@ def get_llm_config() -> dict:
     if not base_url:
         base_url = preset["base_url"] or ""
 
-    rpm = _safe_int(os.environ.get("LLM_RPM_LIMIT") or opts.get("llm_rpm_limit"))
-    tpm = _safe_int(os.environ.get("LLM_TPM_LIMIT") or opts.get("llm_tpm_limit"))
-    rpd = _safe_int(os.environ.get("LLM_RPD_LIMIT") or opts.get("llm_rpd_limit"))
+    rpm = _safe_int(
+        os.environ.get("LLM_RPM_LIMIT")
+        or db_settings.get("llm_rpm_limit")
+        or opts.get("llm_rpm_limit")
+    )
+    tpm = _safe_int(
+        os.environ.get("LLM_TPM_LIMIT")
+        or db_settings.get("llm_tpm_limit")
+        or opts.get("llm_tpm_limit")
+    )
+    rpd = _safe_int(
+        os.environ.get("LLM_RPD_LIMIT")
+        or db_settings.get("llm_rpd_limit")
+        or opts.get("llm_rpd_limit")
+    )
 
     return {
         "provider": provider,
