@@ -108,6 +108,7 @@ export function Incomes() {
       )}
 
       <IncomeModal
+        key={editing?.id ?? 'new'}
         open={creating || !!editing}
         existing={editing}
         onClose={() => { setCreating(false); setEditing(null); }}

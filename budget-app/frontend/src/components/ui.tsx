@@ -1,4 +1,5 @@
 import {
+  useEffect, useState,
   type ReactNode, type InputHTMLAttributes, type SelectHTMLAttributes,
   type TextareaHTMLAttributes, type ButtonHTMLAttributes,
 } from 'react';
@@ -130,11 +131,35 @@ interface ModalProps {
 }
 
 export function Modal({ open, onClose, title, children, width = 480 }: ModalProps) {
+  const [shaking, setShaking] = useState(false);
+
+  // ESC ferme la modal (raccourci clavier desktop)
+  useEffect(() => {
+    if (!open) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onClose();
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [open, onClose]);
+
   if (!open) return null;
+
+  // Clic en-dehors : NE FERME PAS. Déclenche un shake + vibration mobile
+  // + flash sur le bouton Annuler pour orienter l'utilisateur.
+  const onOutsideClick = () => {
+    if (shaking) return;
+    setShaking(true);
+    if ('vibrate' in navigator) {
+      try { navigator.vibrate?.(120); } catch { /* noop */ }
+    }
+    setTimeout(() => setShaking(false), 600);
+  };
+
   return (
-    <div className="modal-overlay" onClick={onClose}>
+    <div className="modal-overlay" onClick={onOutsideClick}>
       <div
-        className="modal-content"
+        className={classNames('modal-content', shaking && 'shaking')}
         onClick={(e) => e.stopPropagation()}
         style={{ width: `min(${width}px, 100%)` }}
       >

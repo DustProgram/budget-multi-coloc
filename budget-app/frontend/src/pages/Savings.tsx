@@ -113,6 +113,7 @@ export function Savings() {
       )}
 
       <SavingModal
+        key={editing?.id ?? 'new'}
         open={creating || !!editing}
         existing={editing}
         onClose={() => { setCreating(false); setEditing(null); }}
