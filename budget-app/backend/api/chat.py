@@ -178,6 +178,24 @@ async def undo_action(
         raise HTTPException(400, str(e))
 
 
+@router.get("/providers")
+async def list_providers(request: Request):
+    """Liste tous les providers LLM supportés avec leur preset par défaut."""
+    from services.llm_client import PROVIDER_PRESETS
+    return {
+        "providers": [
+            {
+                "key": k,
+                "label": v.get("label", k),
+                "default_model": v.get("model") or "",
+                "default_base_url": v.get("base_url") or "",
+                "needs_api_key": k not in ("ollama", "lmstudio"),
+            }
+            for k, v in PROVIDER_PRESETS.items()
+        ],
+    }
+
+
 @router.get("/status")
 async def chat_status(request: Request, db: Session = Depends(get_db)):
     """Renvoie provider, modèle, limites configurées et usage courant."""
