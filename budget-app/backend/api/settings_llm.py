@@ -22,6 +22,7 @@ class LLMSettingsOut(BaseModel):
     rpm_limit: Optional[int]
     tpm_limit: Optional[int]
     rpd_limit: Optional[int]
+    exclude_joint_charges_from_personal: bool
 
 
 class LLMSettingsIn(BaseModel):
@@ -32,6 +33,7 @@ class LLMSettingsIn(BaseModel):
     rpm_limit: Optional[int] = None
     tpm_limit: Optional[int] = None
     rpd_limit: Optional[int] = None
+    exclude_joint_charges_from_personal: Optional[bool] = None
 
 
 def _get_or_create_settings(db: Session) -> Settings:
@@ -58,6 +60,7 @@ async def get_llm_settings(request: Request, db: Session = Depends(get_db)):
         rpm_limit=s.llm_rpm_limit,
         tpm_limit=s.llm_tpm_limit,
         rpd_limit=s.llm_rpd_limit,
+        exclude_joint_charges_from_personal=bool(getattr(s, "exclude_joint_charges_from_personal", False)),
     )
 
 
@@ -89,6 +92,8 @@ async def update_llm_settings(
         s.llm_tpm_limit = data["tpm_limit"]
     if "rpd_limit" in data:
         s.llm_rpd_limit = data["rpd_limit"]
+    if "exclude_joint_charges_from_personal" in data:
+        s.exclude_joint_charges_from_personal = bool(data["exclude_joint_charges_from_personal"])
     db.commit()
     db.refresh(s)
     return LLMSettingsOut(
@@ -99,4 +104,5 @@ async def update_llm_settings(
         rpm_limit=s.llm_rpm_limit,
         tpm_limit=s.llm_tpm_limit,
         rpd_limit=s.llm_rpd_limit,
+        exclude_joint_charges_from_personal=bool(getattr(s, "exclude_joint_charges_from_personal", False)),
     )

@@ -395,6 +395,11 @@ class Settings(Base):
     llm_rpm_limit = Column(Integer, nullable=True)
     llm_tpm_limit = Column(Integer, nullable=True)
     llm_rpd_limit = Column(Integer, nullable=True)
+    # Exclure ma part des charges joint partagées du calcul de ma marge
+    # perso. Utile quand on assume que les colocs abondent et qu'on ne veut
+    # pas voir un 'déficit' artificiel dû à des charges qui seront couvertes
+    # par d'autres.
+    exclude_joint_charges_from_personal = Column(Boolean, default=False, nullable=False)
 
 
 # ============================================================

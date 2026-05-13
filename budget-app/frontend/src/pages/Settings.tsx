@@ -521,6 +521,7 @@ interface LLMSettings {
   rpm_limit: number | null;
   tpm_limit: number | null;
   rpd_limit: number | null;
+  exclude_joint_charges_from_personal: boolean;
 }
 
 function LLMSettingsCard() {
@@ -627,6 +628,28 @@ function LLMSettingsCard() {
             onChange={(e) => setForm({ ...form, rpd_limit: e.target.value ? Number(e.target.value) : 0 })} />
         </Field>
       </div>
+
+      <div className="divider" style={{ margin: '16px 0' }} />
+      <p className="eyebrow">Vue perso</p>
+      <label className="row gap-2" style={{ marginTop: 6, cursor: 'pointer' }}>
+        <input
+          type="checkbox"
+          checked={
+            form.exclude_joint_charges_from_personal ??
+            cur?.exclude_joint_charges_from_personal ?? false
+          }
+          onChange={(e) => setForm({ ...form, exclude_joint_charges_from_personal: e.target.checked })}
+        />
+        <span>
+          <strong>Exclure ma part des charges joint</strong> de ma marge perso.<br />
+          <span className="small muted">
+            Quand activé, ton dashboard ne montre plus de déficit causé par
+            ta quote-part de charges sur compte joint (puisque tu assumes
+            que les colocs abondent leur part). Utile si tu utilises des
+            comptes joints partagés.
+          </span>
+        </span>
+      </label>
 
       {save.isError && (
         <ErrorBox message={save.error instanceof Error ? save.error.message : 'Erreur'} />
