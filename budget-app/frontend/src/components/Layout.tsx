@@ -6,7 +6,7 @@ import {
   LayoutDashboard, CalendarDays, CreditCard, TrendingUp, FileText,
   ArrowLeftRight, PiggyBank, ShoppingBag, Calculator, BarChart3,
   ListChecks, Users, ChevronLeft, ChevronRight, Menu, X, Briefcase,
-  Settings as SettingsIcon, Sparkles, ListOrdered, Camera,
+  Settings as SettingsIcon, Sparkles, ListOrdered, Camera, FileSpreadsheet,
 } from 'lucide-react';
 import { TweaksPanel } from './TweaksPanel';
 import { OfflineBadge } from './OfflineBadge';
@@ -40,6 +40,7 @@ const NAV: NavItem[] = [
   { to: 'simulator', label: 'Simulateur', icon: Calculator, section: 'Outils', colocAllowed: false },
   { to: 'chat', label: 'Assistant IA', icon: Sparkles, section: 'Assistant', colocAllowed: false },
   { to: 'import', label: 'Import auto', icon: Camera, section: 'Assistant', colocAllowed: false },
+  { to: 'bulk-import', label: 'Import Excel', icon: FileSpreadsheet, section: 'Assistant', colocAllowed: false },
   { to: 'settings', label: 'Réglages', icon: SettingsIcon, section: 'Outils', colocAllowed: false },
   { to: 'compta-pro', label: 'Compta-pro', icon: Briefcase, section: 'Pro', proOnly: true, colocAllowed: false },
 ];

@@ -23,6 +23,7 @@ from api import (
     calendar as calendar_api,
     chat as chat_api,
     import_ as import_api,
+    bulk_import as bulk_import_api,
 )
 from models.base import init_db
 from services.backup import perform_monthly_backup
@@ -108,6 +109,7 @@ app.include_router(auth_logout.router, prefix="/api/auth/logout", tags=["auth-lo
 app.include_router(households_api.router, prefix="/api/households", tags=["households"])
 app.include_router(chat_api.router, prefix="/api/chat", tags=["chat"])
 app.include_router(import_api.router, prefix="/api/import", tags=["import"])
+app.include_router(bulk_import_api.router, prefix="/api/bulk-import", tags=["bulk-import"])
 
 # ===== Frontend statique (PWA) =====
 static_dir = Path(os.environ.get("STATIC_DIR", "/app/static"))
