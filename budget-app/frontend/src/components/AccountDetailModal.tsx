@@ -21,12 +21,14 @@ const TYPE_LABEL: Record<EventType, string> = {
   transfer_in: 'Vir. reçu', transfer_out: 'Vir. envoyé',
   saving_in: 'Épargne in', saving_out: 'Épargne out',
   purchase: 'Achat',
+  expected_in: 'Abondement attendu',
 };
 const TYPE_TONE: Record<EventType, 'sage' | 'rose' | 'plum' | 'amber'> = {
   income: 'sage', charge: 'rose',
   transfer_in: 'plum', transfer_out: 'plum',
   saving_in: 'plum', saving_out: 'plum',
   purchase: 'amber',
+  expected_in: 'sage',
 };
 
 interface Props {

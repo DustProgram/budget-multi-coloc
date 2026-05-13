@@ -18,6 +18,7 @@ const TYPE_LABEL: Record<EventType, string> = {
   transfer_in: 'Virement +', transfer_out: 'Virement −',
   saving_in: 'Épargne +', saving_out: 'Épargne −',
   purchase: 'Achat',
+  expected_in: 'Abondement attendu',
 };
 
 const TYPE_TONE: Record<EventType, 'sage' | 'rose' | 'plum' | 'amber'> = {
@@ -25,6 +26,7 @@ const TYPE_TONE: Record<EventType, 'sage' | 'rose' | 'plum' | 'amber'> = {
   transfer_in: 'plum', transfer_out: 'plum',
   saving_in: 'plum', saving_out: 'plum',
   purchase: 'amber',
+  expected_in: 'sage',
 };
 
 type ViewMode = 'flux' | 'compte';

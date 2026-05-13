@@ -26,6 +26,7 @@ const TYPE_DOT: Record<EventType, string> = {
   saving_in: 'saving',
   saving_out: 'saving',
   purchase: 'purchase',
+  expected_in: 'income',
 };
 
 const TYPE_LABEL: Record<EventType, string> = {
@@ -36,6 +37,7 @@ const TYPE_LABEL: Record<EventType, string> = {
   saving_in: 'Épargne reçue',
   saving_out: 'Épargne envoyée',
   purchase: 'Achat',
+  expected_in: 'Abondement attendu',
 };
 
 const TYPE_TONE: Record<EventType, 'sage' | 'rose' | 'plum' | 'amber'> = {
@@ -46,6 +48,7 @@ const TYPE_TONE: Record<EventType, 'sage' | 'rose' | 'plum' | 'amber'> = {
   saving_in: 'plum',
   saving_out: 'plum',
   purchase: 'amber',
+  expected_in: 'sage',
 };
 
 const DAYS = ['Lun', 'Mar', 'Mer', 'Jeu', 'Ven', 'Sam', 'Dim'];
@@ -147,11 +150,12 @@ export function Calendar() {
     });
   }
 
+  const [horizonDays, setHorizonDays] = useState<number>(365);
   const query = useQuery({
-    queryKey: ['calendar', 'upcoming', 180],
+    queryKey: ['calendar', 'upcoming', horizonDays],
     queryFn: async () => {
       const { data } = await api.get<UpcomingResponse>('/calendar/upcoming', {
-        params: { days: 180 },
+        params: { days: horizonDays },
       });
       return data;
     },
@@ -227,6 +231,18 @@ export function Calendar() {
           </>
         }
       >
+        <Select
+          value={horizonDays}
+          onChange={(e) => setHorizonDays(Number(e.target.value))}
+          style={{ minWidth: 130 }}
+          title="Portée de projection"
+        >
+          <option value={90}>3 mois</option>
+          <option value={180}>6 mois</option>
+          <option value={365}>1 an</option>
+          <option value={730}>2 ans</option>
+          <option value={1095}>3 ans</option>
+        </Select>
         <Button onClick={() => setCursor(addMonths(cursor, -1))}><ChevronLeft size={14} /></Button>
         <Button onClick={() => { setCursor(new Date()); setSelected(new Date()); }}>Aujourd'hui</Button>
         <Button onClick={() => setCursor(addMonths(cursor, 1))}><ChevronRight size={14} /></Button>
@@ -399,7 +415,7 @@ export function Calendar() {
       {query.data && query.data.accounts.length > 0 && (
         <>
           <p className="eyebrow" style={{ marginTop: 24, marginBottom: 8 }}>
-            Projection à 180 jours (basée sur tes récurrences)
+            Projection à {horizonDays} jours (basée sur tes récurrences)
           </p>
           <div className="grid" style={{
             gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))',

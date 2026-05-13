@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { FileText, Plus, Trash2, Pencil } from 'lucide-react';
+import { FileText, Plus, Trash2, Pencil, History } from 'lucide-react';
 import { api } from '../lib/api';
 import { eur, num } from '../lib/format';
 import { useAutoEdit } from '../lib/useAutoEdit';
@@ -19,6 +19,7 @@ export function Charges() {
   const qc = useQueryClient();
   const [creating, setCreating] = useState(false);
   const [editing, setEditing] = useState<Charge | null>(null);
+  const [transitioning, setTransitioning] = useState<Charge | null>(null);
 
   const allCharges = useQuery({
     queryKey: ['charges'],
@@ -105,6 +106,9 @@ export function Charges() {
                         <Button variant="sm" onClick={() => setEditing(c)} title="Modifier">
                           <Pencil size={12} />
                         </Button>
+                        <Button variant="sm" onClick={() => setTransitioning(c)} title="Évolution (fin / nouveau montant)">
+                          <History size={12} />
+                        </Button>
                         <Button variant="sm" onClick={() => { if (confirm(`Supprimer "${c.label}" ?`)) remove.mutate(c.id); }} title="Supprimer">
                           <Trash2 size={12} />
                         </Button>
@@ -129,7 +133,87 @@ export function Charges() {
           qc.invalidateQueries({ queryKey: ['coloc'] });
         }}
       />
+      {transitioning && (
+        <ChargeTransitionModal
+          key={transitioning.id}
+          charge={transitioning}
+          onClose={() => setTransitioning(null)}
+          onSaved={() => {
+            setTransitioning(null);
+            qc.invalidateQueries({ queryKey: ['charges'] });
+            qc.invalidateQueries({ queryKey: ['coloc'] });
+          }}
+        />
+      )}
     </>
+  );
+}
+
+function ChargeTransitionModal({
+  charge, onClose, onSaved,
+}: { charge: Charge; onClose: () => void; onSaved: () => void }) {
+  const now = new Date();
+  const defaultMonth = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+  const [yearMonth, setYearMonth] = useState(defaultMonth);
+  const [mode, setMode] = useState<'replace' | 'terminate'>('replace');
+  const [newTotal, setNewTotal] = useState('');
+  const [error, setError] = useState<string | null>(null);
+
+  const submit = useMutation({
+    mutationFn: async () => {
+      const transition_date = `${yearMonth}-01`;
+      const body: Record<string, unknown> = { transition_date, mode };
+      if (mode === 'replace') {
+        if (!newTotal || num(newTotal) <= 0) throw new Error('Saisis le nouveau montant total');
+        body.new_total_amount = newTotal;
+      }
+      await api.post(`/charges/${charge.id}/transition`, body);
+    },
+    onSuccess: () => onSaved(),
+    onError: (e) => setError(e instanceof Error ? e.message : 'Erreur'),
+  });
+
+  return (
+    <Modal open onClose={onClose} title={`Évolution de "${charge.label}"`}>
+      <form onSubmit={(e) => { e.preventDefault(); setError(null); submit.mutate(); }}>
+        <p className="small muted" style={{ marginTop: 0 }}>
+          La charge actuelle ({eur(charge.total_amount)}) sera conservée pour les mois passés.
+          Choisis quand le changement prend effet (ex : augmentation de loyer, fin d'abonnement).
+        </p>
+        <Field label="À partir du mois">
+          <Input type="month" required value={yearMonth}
+            onChange={(e) => setYearMonth(e.target.value)} />
+        </Field>
+        <Field label="Que se passe-t-il ?">
+          <div className="col" style={{ gap: 8 }}>
+            <label className="row gap-2">
+              <input type="radio" checked={mode === 'replace'}
+                onChange={() => setMode('replace')} />
+              <span><strong>Nouveau montant</strong> — création d'une charge successeur</span>
+            </label>
+            <label className="row gap-2">
+              <input type="radio" checked={mode === 'terminate'}
+                onChange={() => setMode('terminate')} />
+              <span><strong>Mettre fin</strong> — n'apparaîtra plus dans les projections</span>
+            </label>
+          </div>
+        </Field>
+        {mode === 'replace' && (
+          <Field label="Nouveau montant total (€)">
+            <Input type="number" step="0.01" required value={newTotal}
+              onChange={(e) => setNewTotal(e.target.value)}
+              placeholder={charge.total_amount} />
+          </Field>
+        )}
+        {error && <ErrorBox message={error} />}
+        <div className="row gap-2" style={{ justifyContent: 'flex-end', marginTop: 16 }}>
+          <Button type="button" onClick={onClose}>Annuler</Button>
+          <Button type="submit" variant="primary" disabled={submit.isPending}>
+            {submit.isPending ? 'En cours…' : 'Valider'}
+          </Button>
+        </div>
+      </form>
+    </Modal>
   );
 }
 

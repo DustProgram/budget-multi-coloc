@@ -75,7 +75,7 @@ class UpcomingResponse(BaseModel):
 async def list_upcoming_events(
     request: Request,
     db: Session = Depends(get_db),
-    days: int = 60,
+    days: int = 365,
     from_date: Optional[date] = None,
 ):
     """Liste les événements financiers à venir, avec solde projeté par compte.
@@ -207,14 +207,14 @@ async def list_upcoming_events(
                 raw.append((d, "purchase", label, -p.monthly_amount,
                             p.account_id, "purchase", p.id))
 
-    # Tri chronologique stable (date, type pour ordre déterministe)
-    raw.sort(key=lambda e: (e[0], e[1]))
-
-    # IMPORTANT — modèle abondement (0.9.0) : charges partagées sur compte
-    # joint sont affichées mais ne plombent pas le solde projeté (on assume
-    # que les abondements des colocs équilibrent).
+    # ABONDEMENTS ATTENDUS (0.9.1) : pour chaque charge partagée sur compte
+    # joint, on injecte des événements "expected_in" virtuels entrants sur
+    # le joint au jour de la charge. Montant = part de chaque membre depuis
+    # ChargeSplit. Comme ça la sortie de la charge est compensée par les
+    # abondements théoriques de tous les membres, et le solde projeté reste
+    # équilibré même si les colocs n'utilisent pas l'app.
     from services.access import is_joint_account
-    from models import SplitMode
+    from models import SplitMode, ChargeSplit, User as UserModel
     _joint_cache: dict[int, bool] = {}
     def _is_joint(acc_id):
         if acc_id is None:
@@ -222,20 +222,45 @@ async def list_upcoming_events(
         if acc_id not in _joint_cache:
             _joint_cache[acc_id] = is_joint_account(db, acc_id)
         return _joint_cache[acc_id]
-    neutralized_charge_ids = {
-        ch.id for ch in charges
+
+    shared_joint_charges = [
+        ch for ch in charges
         if ch.split_mode != SplitMode.PERSO and _is_joint(ch.account_id)
-    }
+    ]
+    if shared_joint_charges:
+        ch_ids = [c.id for c in shared_joint_charges]
+        splits = db.query(ChargeSplit).filter(ChargeSplit.charge_id.in_(ch_ids)).all()
+        splits_by_charge: dict[int, list[ChargeSplit]] = {}
+        for sp in splits:
+            splits_by_charge.setdefault(sp.charge_id, []).append(sp)
+        user_ids = {sp.user_id for sp in splits}
+        users_by_id = {u.id: u for u in db.query(UserModel).filter(UserModel.id.in_(user_ids)).all()}
+        for y, m in _iter_months(today, end):
+            for ch in shared_joint_charges:
+                if not charge_is_active_in_month(ch, m, y):
+                    continue
+                d = _safe_day(y, m, ch.day_of_month)
+                if not (today <= d <= end):
+                    continue
+                for sp in splits_by_charge.get(ch.id, []):
+                    u = users_by_id.get(sp.user_id)
+                    name = (u.display_name or u.ha_username) if u else f"User #{sp.user_id}"
+                    raw.append((
+                        d, "expected_in",
+                        f"Abondement attendu — {name} ({ch.label})",
+                        Decimal(sp.amount or 0),
+                        ch.account_id, "expected_abondement", sp.id,
+                    ))
+
+    # Tri chronologique stable (date, type pour ordre déterministe)
+    raw.sort(key=lambda e: (e[0], e[1]))
 
     events: list[CalendarEvent] = []
     for d, evt_type, label, amount, acc_id, src_kind, src_id in raw:
-        # Skip impact balance pour charges neutralisées (joint partagé)
-        is_neutralized_charge = src_kind == "charge" and src_id in neutralized_charge_ids
         if acc_id not in running:
             # Compte inactif ou appartenant à un autre user : on ignore
             continue
-        if not is_neutralized_charge:
-            running[acc_id] += amount
+        running[acc_id] += amount
         events.append(CalendarEvent(
             date=d,
             type=evt_type,

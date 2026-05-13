@@ -137,3 +137,76 @@ async def delete_income(
         raise HTTPException(403, "Pas le droit de supprimer ce revenu.")
     db.delete(inc)
     db.commit()
+
+
+class TransitionIn(BaseModel):
+    """Transition à un mois donné :
+    - mode='terminate' : pose valid_to et arrête le revenu
+    - mode='replace'   : pose valid_to ET crée un successeur avec nouveau montant
+    """
+    transition_date: DateType  # 1er du mois où le changement prend effet
+    mode: str  # 'terminate' | 'replace'
+    new_amount: Optional[Decimal] = None
+    new_account_id: Optional[int] = None
+    new_day_of_month: Optional[int] = None
+
+
+@router.post("/{income_id}/transition", response_model=IncomeOut)
+async def transition_income(
+    income_id: int,
+    payload: TransitionIn,
+    request: Request,
+    db: Session = Depends(get_db),
+):
+    """Évolution : arrêter ou remplacer un revenu à partir d'un mois donné.
+
+    Pose `valid_to` sur l'ancien (= dernier jour du mois précédent la
+    transition). Si mode='replace', crée un nouveau revenu avec
+    `valid_from = transition_date` et les nouveaux paramètres.
+    """
+    user: User = request.state.user
+    inc = db.query(Income).filter(Income.id == income_id).first()
+    if not inc:
+        raise HTTPException(404, "Revenu introuvable")
+    if not _can_write(db, user, inc):
+        raise HTTPException(403, "Pas le droit de modifier ce revenu.")
+    if payload.mode not in ("terminate", "replace"):
+        raise HTTPException(400, "mode doit être 'terminate' ou 'replace'")
+
+    # Dernier jour du mois précédent
+    from calendar import monthrange
+    td = payload.transition_date
+    if td.month == 1:
+        prev_y, prev_m = td.year - 1, 12
+    else:
+        prev_y, prev_m = td.year, td.month - 1
+    prev_last_day = monthrange(prev_y, prev_m)[1]
+    inc.valid_to = DateType(prev_y, prev_m, prev_last_day)
+    db.flush()
+
+    if payload.mode == "replace":
+        if payload.new_amount is None:
+            raise HTTPException(400, "new_amount requis pour mode=replace")
+        target_acc = payload.new_account_id or inc.account_id
+        if target_acc and not user_can_write_account(db, user.id, target_acc):
+            raise HTTPException(403, "Pas le droit d'écrire sur le compte cible")
+        new_inc = Income(
+            source=inc.source,
+            amount=payload.new_amount,
+            day_of_month=payload.new_day_of_month or inc.day_of_month,
+            type=inc.type,
+            account_id=target_acc,
+            notes=inc.notes,
+            is_active=True,
+            user_id=user.id,
+            valid_from=td,
+            valid_to=None,
+        )
+        db.add(new_inc)
+        db.commit()
+        db.refresh(new_inc)
+        return new_inc
+
+    db.commit()
+    db.refresh(inc)
+    return inc
