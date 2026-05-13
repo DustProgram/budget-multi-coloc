@@ -156,10 +156,18 @@ def compute_monthly_budget(db: Session, user_id: int, year: int, month: int) -> 
     # Setting opt-in : exclure les charges joint partagées de mon budget perso.
     # Utile quand on assume que les colocs abondent et qu'on ne veut pas voir
     # un 'déficit' dû à des charges qui seront en réalité couvertes par eux.
-    from models import Settings
-    from services.access import is_joint_account
+    from models import Settings, AccountMember
     settings = db.query(Settings).first()
-    exclude_joint = settings.exclude_joint_charges_from_personal if settings else False
+    exclude_joint = bool(getattr(settings, "exclude_joint_charges_from_personal", False))
+
+    # Précalcul one-shot des comptes joints (= account_id présents dans
+    # AccountMember). Évite un COUNT par charge / par transfer.
+    joint_account_ids: set[int] = set()
+    if exclude_joint:
+        joint_account_ids = {
+            row[0]
+            for row in db.query(AccountMember.account_id).distinct().all()
+        }
 
     charges = db.query(Charge).filter(
         Charge.user_id == user_id,
@@ -170,8 +178,7 @@ def compute_monthly_budget(db: Session, user_id: int, year: int, month: int) -> 
             continue
         if (exclude_joint
                 and charge.split_mode != SplitMode.PERSO
-                and charge.account_id
-                and is_joint_account(db, charge.account_id)):
+                and charge.account_id in joint_account_ids):
             continue  # ne pas compter dans ma marge perso
         budget.total_charges += compute_my_share(charge)
 
@@ -198,27 +205,22 @@ def compute_monthly_budget(db: Session, user_id: int, year: int, month: int) -> 
     # de son perso.
     perso_to_joint = Decimal(0)
     if exclude_joint:
-        acc_is_joint_cache: dict[int, bool] = {}
-        def _acc_is_joint(acc_id: Optional[int]) -> bool:
-            if not acc_id:
-                return False
-            if acc_id not in acc_is_joint_cache:
-                acc_is_joint_cache[acc_id] = is_joint_account(db, acc_id)
-            return acc_is_joint_cache[acc_id]
         for tr in db.query(RecurringTransfer).filter(
             RecurringTransfer.user_id == user_id,
             RecurringTransfer.is_active.is_(True),
         ).all():
             if not _in_validity_window(tr, year, month):
                 continue
-            if not _acc_is_joint(tr.source_account_id) and _acc_is_joint(tr.dest_account_id):
+            if (tr.source_account_id not in joint_account_ids
+                    and tr.dest_account_id in joint_account_ids):
                 perso_to_joint += tr.amount or Decimal(0)
         for tr in db.query(OneTimeTransfer).filter(
             OneTimeTransfer.user_id == user_id,
         ).all():
             if not (tr.date and tr.date.year == year and tr.date.month == month):
                 continue
-            if not _acc_is_joint(tr.source_account_id) and _acc_is_joint(tr.dest_account_id):
+            if (tr.source_account_id not in joint_account_ids
+                    and tr.dest_account_id in joint_account_ids):
                 perso_to_joint += tr.amount or Decimal(0)
 
     # ===== Solde disponible pour achats =====
@@ -232,20 +234,20 @@ def compute_monthly_budget(db: Session, user_id: int, year: int, month: int) -> 
     )
 
     # ===== 5. Calcul par compte =====
-    from services.access import is_joint_account
-    from models import SplitMode
-
     accounts = db.query(Account).filter(
         Account.user_id == user_id,
         Account.is_active.is_(True),
     ).all()
 
-    # Cache : un compte est-il joint (= au moins un AccountMember) ?
-    _joint_cache: dict[int, bool] = {}
+    # Réutilise le set précalculé. Si on n'avait pas exclude_joint, on
+    # le calcule maintenant en une seule query.
+    if not exclude_joint and not joint_account_ids:
+        joint_account_ids = {
+            row[0]
+            for row in db.query(AccountMember.account_id).distinct().all()
+        }
     def _is_joint(acc_id: int) -> bool:
-        if acc_id not in _joint_cache:
-            _joint_cache[acc_id] = is_joint_account(db, acc_id)
-        return _joint_cache[acc_id]
+        return acc_id in joint_account_ids
 
     for acc in accounts:
         summary = MonthlyAccountSummary(
