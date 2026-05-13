@@ -229,22 +229,28 @@ def compute_monthly_budget(db: Session, user_id: int, year: int, month: int) -> 
                 if tr.source_account_id == acc.id:
                     summary.transfers_net -= tr.amount
 
-        # Charges sur ce compte.
-        # IMPORTANT — modèle abondement (0.9.0) : pour les charges partagées
-        # sur un compte joint, on assume que les colocs abondent à temps. Le
-        # total sort du joint, mais autant d'abondements (théoriques) rentrent
-        # → net = 0. On NE soustrait donc PAS ces charges du solde projeté
-        # du joint, pour ne pas afficher de découvert artificiel.
-        # Le retard d'abondement reste visible sur la page Coloc et le
-        # dashboard perso, sans pénaliser les vues mensuelle/annuelle.
+        # Charges sur ce compte : sortie réelle, TOTAL pour les charges sur
+        # compte joint (le joint paye en entier au moment T), part personnelle
+        # pour les charges perso (compte solo).
         for charge in charges:
             if charge.account_id != acc.id:
                 continue
             if not charge_is_active_in_month(charge, month, year):
                 continue
             if charge.split_mode != SplitMode.PERSO and _is_joint(acc.id):
-                continue  # neutralisée — abondements théoriques compensent
-            summary.charges -= compute_my_share(charge)
+                # Charge partagée sur joint : le TOTAL sort du joint, et chaque
+                # membre doit abonder sa part. On ajoute ici les abondements
+                # ATTENDUS comme entrées sur le joint (pour ne pas afficher
+                # un découvert si les colocs n'utilisent pas l'app).
+                summary.charges -= charge.total_amount
+                from models import ChargeSplit
+                splits = db.query(ChargeSplit).filter(
+                    ChargeSplit.charge_id == charge.id,
+                ).all()
+                for sp in splits:
+                    summary.transfers_net += sp.amount or 0
+            else:
+                summary.charges -= compute_my_share(charge)
 
         # Épargne (compte source = - , destination = +)
         for sv in savings:

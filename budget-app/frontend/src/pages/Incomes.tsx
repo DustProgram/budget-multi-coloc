@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { TrendingUp, Plus, Trash2, Pencil } from 'lucide-react';
+import { TrendingUp, Plus, Trash2, Pencil, History } from 'lucide-react';
 import { api } from '../lib/api';
 import { eur, num } from '../lib/format';
 import { useAutoEdit } from '../lib/useAutoEdit';
@@ -16,6 +16,7 @@ export function Incomes() {
   const qc = useQueryClient();
   const [creating, setCreating] = useState(false);
   const [editing, setEditing] = useState<Income | null>(null);
+  const [transitioning, setTransitioning] = useState<Income | null>(null);
 
   const allIncomes = useQuery({
     queryKey: ['incomes'],
@@ -95,6 +96,9 @@ export function Incomes() {
                       <Button variant="sm" onClick={() => setEditing(i)} title="Modifier">
                         <Pencil size={12} />
                       </Button>
+                      <Button variant="sm" onClick={() => setTransitioning(i)} title="Évolution (fin / nouveau montant)">
+                        <History size={12} />
+                      </Button>
                       <Button variant="sm" onClick={() => { if (confirm(`Supprimer "${i.source}" ?`)) remove.mutate(i.id); }} title="Supprimer">
                         <Trash2 size={12} />
                       </Button>
@@ -115,6 +119,17 @@ export function Incomes() {
         accounts={accounts.data ?? []}
         onSaved={() => qc.invalidateQueries({ queryKey: ['incomes'] })}
       />
+      {transitioning && (
+        <IncomeTransitionModal
+          key={transitioning.id}
+          income={transitioning}
+          onClose={() => setTransitioning(null)}
+          onSaved={() => {
+            setTransitioning(null);
+            qc.invalidateQueries({ queryKey: ['incomes'] });
+          }}
+        />
+      )}
     </>
   );
 }
@@ -212,6 +227,74 @@ function IncomeModal({
           <Button type="button" onClick={onClose}>Annuler</Button>
           <Button type="submit" variant="primary" disabled={submit.isPending}>
             {submit.isPending ? 'Enregistrement…' : (isEdit ? 'Enregistrer' : 'Créer')}
+          </Button>
+        </div>
+      </form>
+    </Modal>
+  );
+}
+
+function IncomeTransitionModal({
+  income, onClose, onSaved,
+}: { income: Income; onClose: () => void; onSaved: () => void }) {
+  const now = new Date();
+  const defaultMonth = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+  const [yearMonth, setYearMonth] = useState(defaultMonth);
+  const [mode, setMode] = useState<'replace' | 'terminate'>('replace');
+  const [newAmount, setNewAmount] = useState('');
+  const [error, setError] = useState<string | null>(null);
+
+  const submit = useMutation({
+    mutationFn: async () => {
+      const transition_date = `${yearMonth}-01`;
+      const body: Record<string, unknown> = { transition_date, mode };
+      if (mode === 'replace') {
+        if (!newAmount || num(newAmount) <= 0) throw new Error('Saisis le nouveau montant');
+        body.new_amount = newAmount;
+      }
+      await api.post(`/incomes/${income.id}/transition`, body);
+    },
+    onSuccess: () => onSaved(),
+    onError: (e) => setError(e instanceof Error ? e.message : 'Erreur'),
+  });
+
+  return (
+    <Modal open onClose={onClose} title={`Évolution de "${income.source}"`}>
+      <form onSubmit={(e) => { e.preventDefault(); setError(null); submit.mutate(); }}>
+        <p className="small muted" style={{ marginTop: 0 }}>
+          Le revenu actuel ({eur(income.amount)}) sera conservé pour les mois passés.
+          Choisis quand le changement prend effet.
+        </p>
+        <Field label="À partir du mois">
+          <Input type="month" required value={yearMonth}
+            onChange={(e) => setYearMonth(e.target.value)} />
+        </Field>
+        <Field label="Que se passe-t-il ?">
+          <div className="col" style={{ gap: 8 }}>
+            <label className="row gap-2">
+              <input type="radio" checked={mode === 'replace'}
+                onChange={() => setMode('replace')} />
+              <span><strong>Nouveau montant</strong> — pour les mois suivants</span>
+            </label>
+            <label className="row gap-2">
+              <input type="radio" checked={mode === 'terminate'}
+                onChange={() => setMode('terminate')} />
+              <span><strong>Mettre fin à ce revenu</strong> — il n'apparaîtra plus dans les projections</span>
+            </label>
+          </div>
+        </Field>
+        {mode === 'replace' && (
+          <Field label="Nouveau montant (€)">
+            <Input type="number" step="0.01" required value={newAmount}
+              onChange={(e) => setNewAmount(e.target.value)}
+              placeholder={income.amount} />
+          </Field>
+        )}
+        {error && <ErrorBox message={error} />}
+        <div className="row gap-2" style={{ justifyContent: 'flex-end', marginTop: 16 }}>
+          <Button type="button" onClick={onClose}>Annuler</Button>
+          <Button type="submit" variant="primary" disabled={submit.isPending}>
+            {submit.isPending ? 'En cours…' : 'Valider'}
           </Button>
         </div>
       </form>

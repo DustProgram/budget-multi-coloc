@@ -232,6 +232,81 @@ async def delete_charge(
     db.commit()
 
 
+class ChargeTransitionIn(BaseModel):
+    transition_date: DateType
+    mode: str  # 'terminate' | 'replace'
+    new_total_amount: Optional[Decimal] = None
+    new_day_of_month: Optional[int] = None
+    new_account_id: Optional[int] = None
+
+
+@router.post("/{charge_id}/transition", response_model=ChargeOut)
+async def transition_charge(
+    charge_id: int,
+    payload: ChargeTransitionIn,
+    request: Request,
+    db: Session = Depends(get_db),
+):
+    """Évolution d'une charge : arrêter ou remplacer à partir d'un mois donné.
+
+    L'ancienne charge garde son `valid_to` (= dernier jour du mois précédent).
+    Si mode='replace', crée une nouvelle charge avec valid_from au mois saisi,
+    mêmes splits que l'ancienne (recalculés via regenerate_splits).
+    """
+    user: User = request.state.user
+    ch = db.query(Charge).filter(Charge.id == charge_id).first()
+    if not ch:
+        raise HTTPException(404, "Charge introuvable")
+    if not ch.account_id or not user_can_write_account(db, user.id, ch.account_id):
+        if ch.user_id != user.id:
+            raise HTTPException(403, "Pas le droit de modifier cette charge.")
+    if payload.mode not in ("terminate", "replace"):
+        raise HTTPException(400, "mode doit être 'terminate' ou 'replace'")
+
+    from calendar import monthrange
+    td = payload.transition_date
+    if td.month == 1:
+        prev_y, prev_m = td.year - 1, 12
+    else:
+        prev_y, prev_m = td.year, td.month - 1
+    ch.valid_to = DateType(prev_y, prev_m, monthrange(prev_y, prev_m)[1])
+    db.flush()
+
+    if payload.mode == "replace":
+        if payload.new_total_amount is None:
+            raise HTTPException(400, "new_total_amount requis pour mode=replace")
+        target_acc = payload.new_account_id or ch.account_id
+        if target_acc and not user_can_write_account(db, user.id, target_acc):
+            raise HTTPException(403, "Pas le droit d'écrire sur le compte cible")
+        new_ch = Charge(
+            label=ch.label,
+            total_amount=payload.new_total_amount,
+            frequency=ch.frequency,
+            day_of_month=payload.new_day_of_month or ch.day_of_month,
+            month=ch.month,
+            split_mode=ch.split_mode,
+            num_colocs=ch.num_colocs,
+            split_value=ch.split_value,
+            account_id=target_acc,
+            is_shared=ch.is_shared,
+            notes=ch.notes,
+            is_active=True,
+            user_id=user.id,
+            valid_from=td,
+            valid_to=None,
+        )
+        db.add(new_ch)
+        db.flush()
+        regenerate_splits(db, new_ch)
+        db.commit()
+        db.refresh(new_ch)
+        return _to_out(db, new_ch, user.id)
+
+    db.commit()
+    db.refresh(ch)
+    return _to_out(db, ch, user.id)
+
+
 def _maybe_warn_threshold(db: Session, user: User) -> None:
     """Si la marge dispo passe sous le seuil alerte → notif HA persistent.
 

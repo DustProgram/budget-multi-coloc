@@ -5,7 +5,8 @@ export type EventType =
   | 'transfer_out'
   | 'saving_in'
   | 'saving_out'
-  | 'purchase';
+  | 'purchase'
+  | 'expected_in';   // abondement attendu d'un coloc sur compte joint
 
 export type SourceKind =
   | 'income'
@@ -13,7 +14,8 @@ export type SourceKind =
   | 'recurring_transfer'
   | 'onetime_transfer'
   | 'saving'
-  | 'purchase';
+  | 'purchase'
+  | 'expected_abondement';
 
 export interface CalendarEvent {
   date: string;
