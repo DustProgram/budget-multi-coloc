@@ -33,13 +33,35 @@ export function Dashboard() {
   const data = dash.data;
   const dispo = data ? num(data.available_for_purchases) : 0;
   const totalWealth = data ? num(data.total_final_balance) : 0;
+  const monthDelta = data ? totalWealth - num(data.total_initial_balance) : 0;
+
+  // Communication cohérente : on parle du SOLDE (stock) pour le titre,
+  // pas du flux mensuel. Un flux négatif n'est pas alarmant si on a du
+  // matelas — c'est juste un mois où on puise dans son épargne.
+  let titre: string;
+  let sousTitre: React.ReactNode;
+  if (!data) {
+    titre = '—'; sousTitre = '—';
+  } else if (totalWealth < 0) {
+    titre = 'Découvert prévu en fin de mois.';
+    sousTitre = <>Tu termines le mois avec <strong>{eur(totalWealth)}</strong>. Il faut alléger les sorties ou repousser un achat.</>;
+  } else if (dispo < 0 && totalWealth > 0) {
+    titre = 'Mois déficitaire — tu puises dans tes économies.';
+    sousTitre = <>Flux du mois : <strong className="neg">{eur(dispo)}</strong>. Solde projeté fin de mois : <strong>{eur(totalWealth)}</strong> (tu vas le diminuer ce mois).</>;
+  } else if (dispo >= 0) {
+    titre = 'Tout va bien ce mois-ci.';
+    sousTitre = <>Marge dispo pour achats spontanés : <strong className="pos">{eur(dispo)}</strong>. Solde projeté fin de mois : <strong>{eur(totalWealth)}</strong>.</>;
+  } else {
+    titre = 'Attention, marge négative.';
+    sousTitre = <>Flux du mois : {eur(dispo)} · Solde projeté : {eur(totalWealth)}</>;
+  }
 
   return (
     <>
       <PageHeader
         eyebrow={`${MONTHS[cursor.month - 1]} ${cursor.year}`}
-        title={dispo >= 0 ? 'Tout va bien ce mois-ci.' : 'Attention, marge négative.'}
-        subtitle={data ? <>Tu as <strong>{eur(dispo)}</strong> de marge pour les achats spontanés. Solde projeté fin de mois : <strong>{eur(data.total_final_balance)}</strong>.</> : '—'}
+        title={titre}
+        subtitle={sousTitre}
       >
         <Button onClick={() => shift(-1)}><ChevronLeft size={14} /></Button>
         <Button variant="primary">{MONTHS[cursor.month - 1]} {cursor.year}</Button>
@@ -66,8 +88,8 @@ export function Dashboard() {
           }}>
             <Kpi label="Patrimoine total" icon={<Wallet size={13} />}
               value={eur(totalWealth)} large tinted
-              sub={<>↗ {eur((num(data.total_final_balance) - num(data.total_initial_balance)).toFixed(2))} ce mois</>}
-              subClass="pos" />
+              sub={<>{monthDelta >= 0 ? '↗' : '↘'} {eur(Math.abs(monthDelta).toFixed(2))} ce mois</>}
+              subClass={monthDelta >= 0 ? 'pos' : 'neg'} />
             <Kpi label="Revenus" icon={<TrendingUp size={13} />} value={eur(data.total_incomes)} />
             <Kpi label="Charges" icon={<FileText size={13} />} value={eur(data.total_charges)} />
             <Kpi label="Épargne" icon={<PiggyBank size={13} />} value={eur(data.total_savings)}
