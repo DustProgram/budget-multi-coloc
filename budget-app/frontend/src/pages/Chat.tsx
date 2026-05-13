@@ -21,8 +21,12 @@ export function Chat() {
 
   const status = useQuery({
     queryKey: ['chat', 'status'],
-    queryFn: async () => (await api.get<{ available: boolean }>('/chat/status')).data,
+    queryFn: async () =>
+      (await api.get<{ available: boolean; provider?: string; model?: string }>('/chat/status')).data,
   });
+  const providerLabel = status.data?.provider
+    ? `${status.data.provider} · ${status.data.model || 'défaut'}`
+    : 'Assistant';
 
   const conversations = useQuery({
     queryKey: ['chat', 'conversations'],
@@ -92,12 +96,12 @@ export function Chat() {
         <PageHeader
           eyebrow="Assistant"
           title="Assistant IA"
-          subtitle="Discute avec Claude pour ajouter des dépenses, des courses, ou consulter ton budget."
+          subtitle="Discute avec un LLM (Claude, GPT, Gemini…) pour ajouter des dépenses, des courses, ou consulter ton budget."
         />
         <EmptyState
           icon={<AlertCircle size={26} />}
-          title="Clé API non configurée"
-          message="Renseigne ta clé Claude API dans Paramètres > Add-on Budget > Configuration (option 'claude_api_key') puis redémarre l'add-on."
+          title="Aucune clé LLM configurée"
+          message="Renseigne llm_provider (anthropic | openai | gemini) et llm_api_key dans Paramètres > Add-on Budget > Configuration, puis redémarre l'add-on."
         />
       </>
     );
@@ -106,7 +110,7 @@ export function Chat() {
   return (
     <>
       <PageHeader
-        eyebrow="Assistant"
+        eyebrow={providerLabel || 'Assistant'}
         title="Assistant IA"
         subtitle="Pose des questions, ajoute des dépenses ou gère ta liste de courses en langage naturel."
       >

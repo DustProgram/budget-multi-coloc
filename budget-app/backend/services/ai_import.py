@@ -26,7 +26,8 @@ from models import (
     Purchase, User,
 )
 from services.access import user_can_write_account
-from services.ai_chat import AIChatError, CLAUDE_MODEL, get_claude_api_key
+from services.ai_chat import AIChatError
+from services.llm_client import LLMError, get_llm_client, is_llm_available
 
 logger = logging.getLogger(__name__)
 
@@ -66,52 +67,33 @@ def _hash_signature(date_iso: str, amount: Decimal, marchand: str) -> str:
 
 
 def analyze_image(image_b64: str, mime_type: str, source_type: str) -> dict:
-    """Envoie l'image à Claude Vision et retourne le JSON parsé.
+    """Envoie l'image au LLM configuré (Anthropic/OpenAI/Gemini) et retourne
+    le JSON parsé.
 
     image_b64 : contenu base64 SANS le préfixe "data:..."
     mime_type : "image/jpeg" | "image/png" | "image/webp"
     """
-    api_key = get_claude_api_key()
-    if not api_key:
+    if not is_llm_available():
         raise AIChatError(
-            "Pas de clé Claude API configurée. Renseigne-la dans Paramètres > Add-on."
+            "Pas de clé LLM configurée. Renseigne llm_api_key dans Paramètres > Add-on."
         )
     if source_type not in SYSTEM_PROMPTS:
         raise AIChatError(f"Type d'import inconnu : {source_type}")
     try:
-        from anthropic import Anthropic
-    except ImportError as e:
-        raise AIChatError("SDK anthropic non installé") from e
-
-    client = Anthropic(api_key=api_key)
+        client = get_llm_client()
+    except LLMError as e:
+        raise AIChatError(str(e))
     try:
-        response = client.messages.create(
-            model=CLAUDE_MODEL,
-            max_tokens=1024,
+        text = client.vision(
+            image_b64=image_b64,
+            mime_type=mime_type,
+            prompt="Analyse cette image et renvoie le JSON demandé.",
             system=SYSTEM_PROMPTS[source_type],
-            messages=[{
-                "role": "user",
-                "content": [
-                    {
-                        "type": "image",
-                        "source": {
-                            "type": "base64",
-                            "media_type": mime_type,
-                            "data": image_b64,
-                        },
-                    },
-                    {
-                        "type": "text",
-                        "text": "Analyse cette image et renvoie le JSON demandé.",
-                    },
-                ],
-            }],
+            max_tokens=1024,
         )
-    except Exception as e:
-        logger.exception("Claude Vision error")
-        raise AIChatError(f"Erreur Claude Vision : {e}")
-
-    text = "".join(b.text for b in response.content if b.type == "text").strip()
+    except LLMError as e:
+        logger.exception("Vision error")
+        raise AIChatError(str(e))
     # Claude peut wrap dans ```json ... ``` malgré l'instruction
     if text.startswith("```"):
         text = text.split("```", 2)[1]

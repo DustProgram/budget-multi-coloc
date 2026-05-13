@@ -180,5 +180,11 @@ async def undo_action(
 
 @router.get("/status")
 async def chat_status(request: Request):
-    """Renvoie si une clé API est configurée (pour cacher l'UI si pas dispo)."""
-    return {"available": bool(ai_chat.get_claude_api_key())}
+    """Renvoie le provider LLM actif et si une clé est configurée."""
+    from services.llm_client import get_llm_config
+    cfg = get_llm_config()
+    return {
+        "available": bool(cfg.get("api_key")),
+        "provider": cfg.get("provider"),
+        "model": cfg.get("model"),
+    }
