@@ -1,5 +1,5 @@
 name: "Budget Multi-Coloc"
-version: "0.8.1"
+version: "0.8.2"
 slug: "budget_multi_coloc"
 description: "Gestionnaire de budget personnel et colocation avec stockage chiffré"
 url: "https://github.com/DustProgram/budget-multi-coloc/tree/main/budget-app"
@@ -78,6 +78,11 @@ options:
   # mais l'app marche très bien (notamment l'import Excel).
   llm_provider: "anthropic"
   llm_api_key: ""
+  # Limites d'usage de l'API (0 = illimité). Empêche de cramer ton quota
+  # ou ton portefeuille. Le compteur tourne sur tous les users de l'add-on.
+  llm_rpm_limit: 0       # requêtes max par minute
+  llm_tpm_limit: 0       # tokens max par minute (input + output)
+  llm_rpd_limit: 0       # requêtes max par jour
   # Modèle à utiliser. Laisser vide pour le défaut du provider :
   #   anthropic → claude-haiku-4-5-20251001
   #   openai    → gpt-4o-mini
@@ -106,4 +111,7 @@ schema:
   llm_api_key: "password?"
   llm_model: "str?"
   llm_base_url: "str?"
+  llm_rpm_limit: int
+  llm_tpm_limit: int
+  llm_rpd_limit: int
   claude_api_key: "password?"

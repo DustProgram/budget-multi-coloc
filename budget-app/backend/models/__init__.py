@@ -607,3 +607,22 @@ class ImportedEntity(Base):
     )
     entity_type = Column(String(40), nullable=False)  # 'purchase' | 'charge' | 'onetime_transfer'
     entity_id = Column(Integer, nullable=False)
+
+
+# ============================================================
+# Tracking usage LLM (rate-limiting RPM / TPM / RPD)
+# ============================================================
+
+class LLMUsage(Base):
+    """Une ligne par appel LLM. Sert au rate-limiting et à l'affichage
+    d'usage côté UI. Rotation : les lignes > 30j sont purgées au démarrage."""
+    __tablename__ = "llm_usage"
+
+    id = Column(Integer, primary_key=True)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    timestamp = Column(DateTime, default=datetime.utcnow, nullable=False, index=True)
+    provider = Column(String(40), nullable=False)
+    model = Column(String(80), nullable=True)
+    input_tokens = Column(Integer, default=0, nullable=False)
+    output_tokens = Column(Integer, default=0, nullable=False)
+    kind = Column(String(20), default="chat", nullable=False)  # 'chat' | 'vision'

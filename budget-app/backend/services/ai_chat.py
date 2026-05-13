@@ -25,7 +25,8 @@ from sqlalchemy.orm import Session
 from models import ChatAction, ChatConversation, ChatMessage, User
 from services import ai_tools
 from services.llm_client import (
-    LLMError, get_llm_client, get_llm_config, is_llm_available,
+    LLMError, RateLimitError, check_rate_limits, get_llm_client,
+    get_llm_config, is_llm_available, record_usage,
 )
 
 logger = logging.getLogger(__name__)
@@ -197,6 +198,10 @@ def run_chat_turn(
         messages_for_api = _serialize_history(history)
 
         try:
+            check_rate_limits(db)
+        except RateLimitError as e:
+            raise AIChatError(str(e))
+        try:
             response = client.chat(
                 messages=messages_for_api,
                 system=SYSTEM_PROMPT,
@@ -206,6 +211,7 @@ def run_chat_turn(
         except LLMError as e:
             logger.exception("Erreur LLM")
             raise AIChatError(str(e))
+        record_usage(db, user.id, response, kind="chat")
 
         tool_uses = response.tool_calls
         assistant_msg = _persist_assistant_message(db, conv, response.text, tool_uses)
