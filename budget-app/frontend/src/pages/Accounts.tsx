@@ -90,16 +90,10 @@ function AccountCard({
   onManageMembers: () => void;
   onShowDetail: () => void;
 }) {
-  const qc = useQueryClient();
-
+  const [confirmingDelete, setConfirmingDelete] = useState(false);
   const members = useQuery({
     queryKey: ['accounts', account.id, 'members'],
     queryFn: async () => (await api.get<AccountMember[]>(`/accounts/${account.id}/members`)).data,
-  });
-
-  const deleteIt = useMutation({
-    mutationFn: async () => api.delete(`/accounts/${account.id}`),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['accounts'] }),
   });
 
   const memberList = members.data ?? [];
@@ -131,13 +125,197 @@ function AccountCard({
         <Button variant="sm" onClick={onManageMembers}>
           <Users size={12} /> Membres
         </Button>
-        <Button variant="sm" onClick={() => {
-          if (confirm(`Supprimer le compte "${account.name}" ?`)) deleteIt.mutate();
-        }}>
+        <Button variant="sm" onClick={() => setConfirmingDelete(true)}>
           <Trash2 size={12} />
         </Button>
       </div>
+      {confirmingDelete && (
+        <DeleteAccountModal
+          account={account}
+          onClose={() => setConfirmingDelete(false)}
+        />
+      )}
     </Card>
+  );
+}
+
+interface DepItem { id: number; label: string; amount: string | null; extra: string | null }
+interface Dependencies {
+  account_id: number;
+  account_name: string;
+  incomes: DepItem[];
+  charges: DepItem[];
+  charge_splits: number;
+  recurring_transfers_out: DepItem[];
+  recurring_transfers_in: DepItem[];
+  onetime_transfers_out: DepItem[];
+  onetime_transfers_in: DepItem[];
+  savings_out: DepItem[];
+  savings_in: DepItem[];
+  purchases: DepItem[];
+  custom_events: DepItem[];
+  total_count: number;
+}
+
+function DeleteAccountModal({ account, onClose }: { account: Account; onClose: () => void }) {
+  const qc = useQueryClient();
+  const [mode, setMode] = useState<'cascade' | 'reassign' | null>(null);
+  const [reassignTo, setReassignTo] = useState<number | null>(null);
+
+  const deps = useQuery({
+    queryKey: ['accounts', account.id, 'dependencies'],
+    queryFn: async () => (await api.get<Dependencies>(`/accounts/${account.id}/dependencies`)).data,
+  });
+
+  const otherAccounts = useQuery({
+    queryKey: ['accounts', 'all'],
+    queryFn: async () => (await api.get<Account[]>('/accounts/')).data,
+  });
+
+  const remove = useMutation({
+    mutationFn: async () => {
+      const params: Record<string, string | number> = {};
+      if (mode === 'cascade') params.cascade = 'true';
+      if (mode === 'reassign' && reassignTo) params.reassign_to = reassignTo;
+      const qs = new URLSearchParams(params as Record<string, string>).toString();
+      return api.delete(`/accounts/${account.id}${qs ? `?${qs}` : ''}`);
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['accounts'] });
+      qc.invalidateQueries({ queryKey: ['charges'] });
+      qc.invalidateQueries({ queryKey: ['incomes'] });
+      qc.invalidateQueries({ queryKey: ['transfers'] });
+      qc.invalidateQueries({ queryKey: ['savings'] });
+      qc.invalidateQueries({ queryKey: ['purchases'] });
+      qc.invalidateQueries({ queryKey: ['coloc'] });
+      onClose();
+    },
+  });
+
+  const d = deps.data;
+  const hasDeps = (d?.total_count ?? 0) > 0;
+  const candidateAccounts = (otherAccounts.data ?? []).filter((a) => a.id !== account.id);
+
+  return (
+    <Modal open onClose={onClose} title={`Supprimer "${account.name}"`} width={640}>
+      {deps.isLoading && <Loader />}
+      {d && !hasDeps && (
+        <>
+          <p>Aucun mouvement n'est lié à ce compte. Suppression sans risque.</p>
+          <div className="row gap-2" style={{ justifyContent: 'flex-end', marginTop: 16 }}>
+            <Button onClick={onClose}>Annuler</Button>
+            <Button
+              variant="primary"
+              onClick={() => { setMode('cascade'); remove.mutate(); }}
+              disabled={remove.isPending}
+            >
+              <Trash2 size={14} /> Supprimer
+            </Button>
+          </div>
+        </>
+      )}
+      {d && hasDeps && (
+        <>
+          <p style={{ marginTop: 0 }}>
+            <strong>{d.total_count} élément{d.total_count > 1 ? 's' : ''} lié{d.total_count > 1 ? 's' : ''}</strong> à
+            ce compte. Choisis comment les traiter :
+          </p>
+          <DependenciesList deps={d} />
+
+          <div className="divider" style={{ margin: '16px 0' }} />
+
+          <Field label="Que faire ?">
+            <div className="col" style={{ gap: 8 }}>
+              <label className="row gap-2">
+                <input type="radio" checked={mode === 'reassign'}
+                  onChange={() => setMode('reassign')} />
+                <span><strong>Réassigner</strong> à un autre compte (les mouvements
+                seront déplacés, rien n'est perdu)</span>
+              </label>
+              {mode === 'reassign' && (
+                <Select value={reassignTo ?? ''}
+                  onChange={(e) => setReassignTo(e.target.value ? Number(e.target.value) : null)}>
+                  <option value="">— Choisir le compte cible —</option>
+                  {candidateAccounts.map((a) => (
+                    <option key={a.id} value={a.id}>{a.name} — {a.bank}</option>
+                  ))}
+                </Select>
+              )}
+              <label className="row gap-2">
+                <input type="radio" checked={mode === 'cascade'}
+                  onChange={() => setMode('cascade')} />
+                <span><strong style={{ color: 'var(--rose)' }}>Tout supprimer</strong> :
+                le compte ET tous les mouvements listés ci-dessus (irréversible)</span>
+              </label>
+            </div>
+          </Field>
+
+          {remove.isError && (
+            <ErrorBox message={remove.error instanceof Error ? remove.error.message : 'Erreur'} />
+          )}
+
+          <div className="row gap-2" style={{ justifyContent: 'flex-end', marginTop: 16 }}>
+            <Button onClick={onClose}>Annuler</Button>
+            <Button
+              variant="primary"
+              onClick={() => remove.mutate()}
+              disabled={
+                remove.isPending
+                || !mode
+                || (mode === 'reassign' && !reassignTo)
+              }
+            >
+              {remove.isPending ? 'Suppression…' :
+                mode === 'cascade' ? 'Tout supprimer' :
+                mode === 'reassign' ? 'Réassigner et supprimer' :
+                'Choisis une option'}
+            </Button>
+          </div>
+        </>
+      )}
+    </Modal>
+  );
+}
+
+function DependenciesList({ deps }: { deps: Dependencies }) {
+  const sections: Array<{ title: string; items: DepItem[] | undefined; count?: number }> = [
+    { title: 'Revenus', items: deps.incomes },
+    { title: 'Charges', items: deps.charges, count: deps.charge_splits ? deps.charges.length : undefined },
+    { title: 'Virements récurrents (sortants)', items: deps.recurring_transfers_out },
+    { title: 'Virements récurrents (entrants)', items: deps.recurring_transfers_in },
+    { title: 'Virements ponctuels (sortants)', items: deps.onetime_transfers_out },
+    { title: 'Virements ponctuels (entrants)', items: deps.onetime_transfers_in },
+    { title: 'Épargne (sortante)', items: deps.savings_out },
+    { title: 'Épargne (entrante)', items: deps.savings_in },
+    { title: 'Achats', items: deps.purchases },
+    { title: 'Événements custom', items: deps.custom_events },
+  ];
+  return (
+    <div style={{ maxHeight: 260, overflowY: 'auto', border: '1px solid var(--line)',
+      borderRadius: 8, padding: 8, background: 'var(--bg-sunken)' }}>
+      {sections.filter((s) => s.items && s.items.length > 0).map((s) => (
+        <details key={s.title} style={{ marginBottom: 6 }}>
+          <summary style={{ cursor: 'pointer', fontSize: 13, fontWeight: 500 }}>
+            {s.title} <span className="muted">({s.items!.length})</span>
+          </summary>
+          <ul style={{ margin: '6px 0 0 18px', padding: 0, fontSize: 12 }}>
+            {s.items!.map((it) => (
+              <li key={it.id}>
+                {it.label}
+                {it.amount && <span className="muted"> · {eur(it.amount)}</span>}
+                {it.extra && <span className="muted"> · {it.extra}</span>}
+              </li>
+            ))}
+          </ul>
+        </details>
+      ))}
+      {deps.charge_splits > 0 && (
+        <p className="small muted" style={{ margin: '6px 0 0' }}>
+          + {deps.charge_splits} part{deps.charge_splits > 1 ? 's' : ''} coloc liée{deps.charge_splits > 1 ? 's' : ''} aux charges
+          (supprimée{deps.charge_splits > 1 ? 's' : ''} automatiquement avec les charges).
+        </p>
+      )}
+    </div>
   );
 }
 
