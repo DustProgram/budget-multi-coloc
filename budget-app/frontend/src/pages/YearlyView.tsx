@@ -47,13 +47,17 @@ export function YearlyView() {
 
   const months = (query.data ?? []).map((d) => {
     if (!filteredAccountIds) {
+      // Net = delta réel du mois (final - initial), pour matcher MonthlyView
+      // et inclure les transfers_net (notamment les abondements attendus
+      // injectés sur les comptes joints en 0.9.1).
+      const net = num(d.total_final_balance) - num(d.total_initial_balance);
       return {
         m: MONTHS_SHORT[d.month - 1],
         incomes: num(d.total_incomes),
         charges: num(d.total_charges),
         savings: num(d.total_savings),
         purchases: num(d.total_purchases_imputed),
-        net: num(d.total_incomes) - num(d.total_charges) - num(d.total_savings) - num(d.total_purchases_imputed),
+        net,
       };
     }
     // Filtre actif → on agrège seulement sur les comptes sélectionnés
@@ -62,14 +66,16 @@ export function YearlyView() {
     const charges = -accs.reduce((s, a) => s + num(a.charges), 0); // a.charges est négatif
     const savings = -accs.reduce((s, a) => s + num(a.savings), 0);
     const purchases = -accs.reduce((s, a) => s + num(a.purchases), 0);
-    const transfersNet = accs.reduce((s, a) => s + num(a.transfers_net), 0);
+    // Delta réel = final - initial du sous-ensemble de comptes filtrés
+    const startBal = accs.reduce((s, a) => s + num(a.initial_balance), 0);
+    const endBal = accs.reduce((s, a) => s + num(a.final_balance), 0);
     return {
       m: MONTHS_SHORT[d.month - 1],
       incomes,
       charges,
       savings,
       purchases,
-      net: incomes - charges - savings - purchases + transfersNet,
+      net: endBal - startBal,
     };
   });
 
