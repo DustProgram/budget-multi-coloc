@@ -380,6 +380,15 @@ class Settings(Base):
     alert_enabled = Column(Boolean, default=True)
     last_backup_at = Column(DateTime, nullable=True)
     categories = Column(Text, default="Alimentation,Transport,Loisirs,Vêtements,Santé,Restaurants,Cadeaux,Maison,Tech / Abonnements,Voyages,Sport,Autre")
+    # Surcharge LLM en DB (prime sur config.yaml HA add-on)
+    # Permet de modifier provider/clé/modèle/limites depuis l'UI sans redémarrage.
+    llm_provider = Column(String(40), nullable=True)
+    llm_api_key = Column(Text, nullable=True)
+    llm_model = Column(String(80), nullable=True)
+    llm_base_url = Column(String(255), nullable=True)
+    llm_rpm_limit = Column(Integer, nullable=True)
+    llm_tpm_limit = Column(Integer, nullable=True)
+    llm_rpd_limit = Column(Integer, nullable=True)
 
 
 # ============================================================

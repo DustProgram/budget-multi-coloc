@@ -56,6 +56,11 @@ export function Layout() {
     queryKey: ['me'],
     queryFn: async () => (await api.get<Me>('/users/me')).data,
   });
+  const versionQ = useQuery({
+    queryKey: ['version'],
+    queryFn: async () => (await api.get<{ version: string }>('/health/version')).data,
+    staleTime: 60 * 60_000,
+  });
   const proEnabled = me.data?.pro_enabled ?? false;
   const sessionScope = me.data?.session_scope ?? 'full';
   const isColocSession = sessionScope === 'coloc';
@@ -86,7 +91,7 @@ export function Layout() {
               <div className="brand-name">
                 Budget Coloc
                 <small>
-                  {isColocSession ? 'Mode coloc' : 'HA · v0.4'}
+                  {isColocSession ? 'Mode coloc' : `HA · v${versionQ.data?.version ?? '...'}`}
                 </small>
               </div>
               <button className="collapse-btn" onClick={() => setCollapsed(true)} aria-label="Réduire">
