@@ -190,13 +190,45 @@ def compute_monthly_budget(db: Session, user_id: int, year: int, month: int) -> 
         Decimal(0),
     )
 
+    # ===== Virements perso → joint (abondements) =====
+    # Quand on a coché 'exclure ma part des charges joint' du budget perso,
+    # les charges joint ne sont plus comptées dans total_charges. À la place,
+    # on compte les virements que l'utilisateur fait effectivement vers les
+    # comptes joints (= ses abondements réels). C'est ce qui sort réellement
+    # de son perso.
+    perso_to_joint = Decimal(0)
+    if exclude_joint:
+        acc_is_joint_cache: dict[int, bool] = {}
+        def _acc_is_joint(acc_id: Optional[int]) -> bool:
+            if not acc_id:
+                return False
+            if acc_id not in acc_is_joint_cache:
+                acc_is_joint_cache[acc_id] = is_joint_account(db, acc_id)
+            return acc_is_joint_cache[acc_id]
+        for tr in db.query(RecurringTransfer).filter(
+            RecurringTransfer.user_id == user_id,
+            RecurringTransfer.is_active.is_(True),
+        ).all():
+            if not _in_validity_window(tr, year, month):
+                continue
+            if not _acc_is_joint(tr.source_account_id) and _acc_is_joint(tr.dest_account_id):
+                perso_to_joint += tr.amount or Decimal(0)
+        for tr in db.query(OneTimeTransfer).filter(
+            OneTimeTransfer.user_id == user_id,
+        ).all():
+            if not (tr.date and tr.date.year == year and tr.date.month == month):
+                continue
+            if not _acc_is_joint(tr.source_account_id) and _acc_is_joint(tr.dest_account_id):
+                perso_to_joint += tr.amount or Decimal(0)
+
     # ===== Solde disponible pour achats =====
-    # Revenus - Charges - Épargne - Achats déjà saisis
+    # Revenus - Charges - Épargne - Achats - Virements perso→joint (si toggle)
     budget.available_for_purchases = (
         budget.total_incomes
         - budget.total_charges
         - budget.total_savings
         - budget.total_purchases_imputed
+        - perso_to_joint
     )
 
     # ===== 5. Calcul par compte =====
