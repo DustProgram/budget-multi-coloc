@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import { useQuery } from '@tanstack/react-query';
+import { useQueries, useQuery } from '@tanstack/react-query';
 import { ChevronLeft, ChevronRight } from 'lucide-react';
 import { api } from '../lib/api';
 import { eur, num } from '../lib/format';
@@ -46,22 +46,36 @@ export function MonthlyView() {
     queryKey: ['accounts'],
     queryFn: async () => (await api.get<Account[]>('/accounts/')).data,
   });
-  // Pour le solde cumulé (mode 'compte') on a besoin du delta des mois passés
-  // dans l'année courante. /dashboard/yearly retourne 12 MonthlyBudget.
-  const yearlyQ = useQuery({
-    queryKey: ['dashboard', 'yearly', cursor.year],
-    queryFn: async () =>
-      (await api.get<Array<{
-        month: number;
-        total_initial_balance: string;
-        total_final_balance: string;
-        accounts: Array<{
-          account_id: number;
-          initial_balance: string;
-          final_balance: string;
-        }>;
-      }>>('/dashboard/yearly', { params: { year: cursor.year } })).data,
+  // Pour le solde cumulé (mode 'compte') on cumule depuis l'année courante
+  // jusqu'à 3 années en arrière.
+  type YearlyRow = {
+    month: number;
+    accounts: Array<{
+      account_id: number;
+      initial_balance: string;
+      final_balance: string;
+    }>;
+  };
+  type DatedRow = YearlyRow & { year: number };
+  const yearsToFetch = [cursor.year, cursor.year - 1, cursor.year - 2, cursor.year - 3];
+  const yearlyQueries = useQueries({
+    queries: yearsToFetch.map((y) => ({
+      queryKey: ['dashboard', 'yearly', y],
+      queryFn: async () =>
+        (await api.get<YearlyRow[]>('/dashboard/yearly', { params: { year: y } })).data,
+    })),
   });
+  const yearlyAll: DatedRow[] = useMemo(() => {
+    const all: DatedRow[] = [];
+    for (let i = 0; i < yearlyQueries.length; i++) {
+      const y = yearsToFetch[i];
+      const data = yearlyQueries[i].data;
+      if (!data) continue;
+      for (const m of data) all.push({ ...m, year: y });
+    }
+    return all;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [yearlyQueries.map((q) => q.dataUpdatedAt).join('|'), cursor.year]);
 
   function shift(delta: number) {
     const d = new Date(cursor.year, cursor.month - 1 + delta, 1);
@@ -160,13 +174,14 @@ export function MonthlyView() {
         const accs = accountsQ.data ?? [];
         const filteredAccs = accs.filter((a) => filteredAccountIds.has(a.id));
         const baseBalance = filteredAccs.reduce((s, a) => s + num(a.initial_balance), 0);
-        // Cumul des deltas des mois précédents de l'année courante.
-        // Permet d'afficher le VRAI solde au début du mois affiché et pas
-        // juste le solde initial figé en DB.
-        const yearly = yearlyQ.data ?? [];
+        // Cumul des deltas des mois précédents — sur PLUSIEURS années
+        // (jusqu'à 3 ans en arrière) pour couvrir le cas où on navigue
+        // sur l'année suivante : le delta de l'année précédente doit s'ajouter.
         let priorDelta = 0;
-        for (const m of yearly) {
-          if (m.month >= cursor.month) continue;
+        for (const m of yearlyAll) {
+          // Strict <  cursor (year, month)
+          if (m.year > cursor.year) continue;
+          if (m.year === cursor.year && m.month >= cursor.month) continue;
           const monthAccs = m.accounts.filter((a) => filteredAccountIds.has(a.account_id));
           const init = monthAccs.reduce((s, a) => s + num(a.initial_balance), 0);
           const fin = monthAccs.reduce((s, a) => s + num(a.final_balance), 0);
