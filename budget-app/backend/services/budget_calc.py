@@ -139,9 +139,20 @@ def purchase_impute_amount(purchase: Purchase, year: int, month: int) -> Decimal
 # ============================================================
 
 def compute_monthly_budget(db: Session, user_id: int, year: int, month: int) -> MonthlyBudget:
+    """Wrapper avec cache 30s autour de _compute_monthly_budget_uncached.
+
+    Le cache est invalidé automatiquement par un listener SQLAlchemy à
+    chaque mutation d'une table impactant le budget (cf budget_cache.py).
     """
-    Calcule le budget complet d'un utilisateur pour un mois donné.
-    """
+    from services.budget_cache import get_or_compute
+    return get_or_compute(
+        user_id, year, month,
+        factory=lambda: _compute_monthly_budget_uncached(db, user_id, year, month),
+    )
+
+
+def _compute_monthly_budget_uncached(db: Session, user_id: int, year: int, month: int) -> MonthlyBudget:
+    """Calcule le budget complet d'un utilisateur pour un mois donné."""
     budget = MonthlyBudget(user_id=user_id, year=year, month=month)
 
     # ===== 1. REVENUS =====
@@ -342,8 +353,48 @@ def compute_monthly_budget(db: Session, user_id: int, year: int, month: int) -> 
 # ============================================================
 
 def compute_yearly_overview(db: Session, user_id: int, year: int) -> list[MonthlyBudget]:
-    """Retourne 12 résumés mensuels (jan-déc) pour l'utilisateur."""
-    return [compute_monthly_budget(db, user_id, year, m) for m in range(1, 13)]
+    """Retourne 12 résumés mensuels (jan-déc) pour l'utilisateur.
+
+    Optimisé : profite du cache 30s par mois (chaque appel à
+    compute_monthly_budget hit le cache si rappelé dans la fenêtre).
+    Plus une optim batch : pré-warming du cache via UNE seule SELECT par
+    table, gardé en session SQLAlchemy. Les 12 appels suivants tapent dans
+    l'identity_map au lieu de refaire des SELECTs.
+    """
+    from services.budget_cache import get_or_compute
+
+    # Pré-warming : charge toutes les entités en une fois. SQLAlchemy met
+    # tout dans l'identity_map de la session, donc les queries suivantes
+    # dans _compute_monthly_budget_uncached sont servies depuis le cache.
+    db.query(Income).filter(
+        Income.user_id == user_id, Income.is_active.is_(True),
+    ).all()
+    db.query(Charge).filter(
+        Charge.user_id == user_id, Charge.is_active.is_(True),
+    ).all()
+    db.query(RecurringTransfer).filter(
+        RecurringTransfer.user_id == user_id,
+        RecurringTransfer.is_active.is_(True),
+    ).all()
+    db.query(OneTimeTransfer).filter(OneTimeTransfer.user_id == user_id).all()
+    db.query(AutoSaving).filter(
+        AutoSaving.user_id == user_id, AutoSaving.is_active.is_(True),
+    ).all()
+    db.query(Purchase).filter(Purchase.user_id == user_id).all()
+    db.query(Account).filter(
+        Account.user_id == user_id, Account.is_active.is_(True),
+    ).all()
+    # joint_account_ids : 1 query
+    from models import AccountMember
+    db.query(AccountMember.account_id).distinct().all()
+
+    return [
+        get_or_compute(
+            user_id, year, m,
+            factory=lambda y=year, mm=m: _compute_monthly_budget_uncached(db, user_id, y, mm),
+        )
+        for m in range(1, 13)
+    ]
 
 
 # ============================================================

@@ -73,3 +73,49 @@ async def get_yearly(
     user: User = request.state.user
     y = year if year is not None else date.today().year
     return [_serialize(b) for b in compute_yearly_overview(db, user.id, y)]
+
+
+@router.get("/balance_at")
+async def get_balance_at(
+    request: Request,
+    db: Session = Depends(get_db),
+    year: Optional[int] = None,
+    month: Optional[int] = None,
+    history_years: int = 3,
+):
+    """Solde cumulé au DÉBUT du mois donné.
+
+    = solde_initial(comptes_accessibles) + Σ deltas(mois précédents)
+    sur 'history_years' années passées.
+
+    Permet à MonthlyView (mode 'compte') de ne faire qu'UN seul fetch
+    au lieu de 4× /dashboard/yearly. Côté backend, profite du cache 30s
+    sur compute_monthly_budget.
+    """
+    user: User = request.state.user
+    today = date.today()
+    y = year if year is not None else today.year
+    m = month if month is not None else today.month
+
+    from models import Account
+    accounts = db.query(Account).filter(
+        Account.user_id == user.id, Account.is_active.is_(True),
+    ).all()
+    base = sum((a.initial_balance or 0 for a in accounts), 0)
+
+    cumul_delta = 0
+    for yy in range(y - history_years, y + 1):
+        for mm in range(1, 13):
+            if yy > y or (yy == y and mm >= m):
+                continue
+            budget = compute_monthly_budget(db, user.id, yy, mm)
+            for acc in budget.accounts:
+                cumul_delta += float(acc.final_balance - acc.initial_balance)
+
+    return {
+        "year": y,
+        "month": m,
+        "base_balance": float(base),
+        "cumul_delta": cumul_delta,
+        "balance_at_start": float(base) + cumul_delta,
+    }

@@ -29,6 +29,7 @@ from api import (
 from models.base import init_db
 from services.backup import perform_monthly_backup
 from services.auth import HAUserMiddleware
+from services.budget_cache import attach_sqlalchemy_listeners
 
 logging.basicConfig(
     level=os.environ.get("LOG_LEVEL", "info").upper(),
@@ -44,6 +45,7 @@ async def lifespan(app: FastAPI):
     # Init au démarrage
     logger.info("🚀 Démarrage Budget Multi-Coloc")
     init_db()
+    attach_sqlalchemy_listeners()
 
     # Planifier le backup mensuel (1er de chaque mois à 03h00)
     if os.environ.get("BACKUP_ENABLED", "true").lower() == "true":

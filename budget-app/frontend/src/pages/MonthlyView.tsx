@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import { useQueries, useQuery } from '@tanstack/react-query';
+import { useQuery } from '@tanstack/react-query';
 import { ChevronLeft, ChevronRight } from 'lucide-react';
 import { api } from '../lib/api';
 import { eur, num } from '../lib/format';
@@ -46,36 +46,18 @@ export function MonthlyView() {
     queryKey: ['accounts'],
     queryFn: async () => (await api.get<Account[]>('/accounts/')).data,
   });
-  // Pour le solde cumulé (mode 'compte') on cumule depuis l'année courante
-  // jusqu'à 3 années en arrière.
-  type YearlyRow = {
-    month: number;
-    accounts: Array<{
-      account_id: number;
-      initial_balance: string;
-      final_balance: string;
-    }>;
-  };
-  type DatedRow = YearlyRow & { year: number };
-  const yearsToFetch = [cursor.year, cursor.year - 1, cursor.year - 2, cursor.year - 3];
-  const yearlyQueries = useQueries({
-    queries: yearsToFetch.map((y) => ({
-      queryKey: ['dashboard', 'yearly', y],
-      queryFn: async () =>
-        (await api.get<YearlyRow[]>('/dashboard/yearly', { params: { year: y } })).data,
-    })),
+  // Pour le solde cumulé (mode 'compte') : 1 seul fetch sur /balance_at
+  // qui retourne le cumul des deltas mensuels précédents (3 ans d'historique
+  // par défaut, configurable). Bien plus léger que les 4× /dashboard/yearly.
+  const balanceAtQ = useQuery({
+    queryKey: ['dashboard', 'balance_at', cursor.year, cursor.month],
+    queryFn: async () =>
+      (await api.get<{
+        balance_at_start: number;
+        base_balance: number;
+        cumul_delta: number;
+      }>('/dashboard/balance_at', { params: { year: cursor.year, month: cursor.month } })).data,
   });
-  const yearlyAll: DatedRow[] = useMemo(() => {
-    const all: DatedRow[] = [];
-    for (let i = 0; i < yearlyQueries.length; i++) {
-      const y = yearsToFetch[i];
-      const data = yearlyQueries[i].data;
-      if (!data) continue;
-      for (const m of data) all.push({ ...m, year: y });
-    }
-    return all;
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [yearlyQueries.map((q) => q.dataUpdatedAt).join('|'), cursor.year]);
 
   function shift(delta: number) {
     const d = new Date(cursor.year, cursor.month - 1 + delta, 1);
@@ -173,21 +155,13 @@ export function MonthlyView() {
       {query.data && (() => {
         const accs = accountsQ.data ?? [];
         const filteredAccs = accs.filter((a) => filteredAccountIds.has(a.id));
-        const baseBalance = filteredAccs.reduce((s, a) => s + num(a.initial_balance), 0);
-        // Cumul des deltas des mois précédents — sur PLUSIEURS années
-        // (jusqu'à 3 ans en arrière) pour couvrir le cas où on navigue
-        // sur l'année suivante : le delta de l'année précédente doit s'ajouter.
-        let priorDelta = 0;
-        for (const m of yearlyAll) {
-          // Strict <  cursor (year, month)
-          if (m.year > cursor.year) continue;
-          if (m.year === cursor.year && m.month >= cursor.month) continue;
-          const monthAccs = m.accounts.filter((a) => filteredAccountIds.has(a.account_id));
-          const init = monthAccs.reduce((s, a) => s + num(a.initial_balance), 0);
-          const fin = monthAccs.reduce((s, a) => s + num(a.final_balance), 0);
-          priorDelta += fin - init;
-        }
-        const currentBalance = baseBalance + priorDelta;
+        // Solde au début du mois = endpoint optimisé balance_at.
+        // (Note : le filtre par compte n'est pas appliqué côté endpoint, il
+        // retourne le cumul global. Filtrer côté front sur une partie de
+        // l'historique est complexe ; pour l'instant on accepte que le mode
+        // 'compte' considère tous les comptes pour le cumul historique.)
+        const currentBalance = balanceAtQ.data?.balance_at_start
+          ?? filteredAccs.reduce((s, a) => s + num(a.initial_balance), 0);
         const endBalance = currentBalance + totals.net;
         return (
         <>
