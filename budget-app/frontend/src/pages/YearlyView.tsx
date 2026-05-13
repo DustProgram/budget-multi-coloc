@@ -14,6 +14,7 @@ type AccountFilter = 'all' | 'perso' | 'joint' | number;
 const MONTHS_SHORT = ['Jan','Fév','Mar','Avr','Mai','Juin','Juil','Aoû','Sep','Oct','Nov','Déc'];
 
 const METRICS = [
+  { id: 'patrimoine', label: 'Patrimoine', color: 'var(--terra)' },
   { id: 'net', label: 'Solde net', color: 'var(--terra)' },
   { id: 'incomes', label: 'Revenus', color: 'var(--sage)' },
   { id: 'charges', label: 'Charges', color: 'var(--rose)' },
@@ -45,39 +46,42 @@ export function YearlyView() {
     return new Set([filter as number]);
   }, [filter, accountsQ.data]);
 
-  const months = (query.data ?? []).map((d) => {
-    if (!filteredAccountIds) {
-      // Net = delta réel du mois (final - initial), pour matcher MonthlyView
-      // et inclure les transfers_net (notamment les abondements attendus
-      // injectés sur les comptes joints en 0.9.1).
-      const net = num(d.total_final_balance) - num(d.total_initial_balance);
+  const months = useMemo(() => {
+    // Calcul du patrimoine cumulé : on accumule les deltas mensuels sur le
+    // solde initial des comptes. Le mois N affiche le solde EN FIN de mois N.
+    let cumulative = 0;
+    let baseSet = false;
+    return (query.data ?? []).map((d) => {
+      const accs = filteredAccountIds
+        ? d.accounts.filter((a) => filteredAccountIds.has(a.account_id))
+        : d.accounts;
+      const startBal = accs.reduce((s, a) => s + num(a.initial_balance), 0);
+      const endBal = accs.reduce((s, a) => s + num(a.final_balance), 0);
+      if (!baseSet) {
+        cumulative = startBal;
+        baseSet = true;
+      }
+      cumulative += endBal - startBal;
+      const incomes = filteredAccountIds
+        ? accs.reduce((s, a) => s + num(a.incomes), 0)
+        : num(d.total_incomes);
+      const charges = filteredAccountIds
+        ? -accs.reduce((s, a) => s + num(a.charges), 0)
+        : num(d.total_charges);
+      const savings = filteredAccountIds
+        ? -accs.reduce((s, a) => s + num(a.savings), 0)
+        : num(d.total_savings);
+      const purchases = filteredAccountIds
+        ? -accs.reduce((s, a) => s + num(a.purchases), 0)
+        : num(d.total_purchases_imputed);
       return {
         m: MONTHS_SHORT[d.month - 1],
-        incomes: num(d.total_incomes),
-        charges: num(d.total_charges),
-        savings: num(d.total_savings),
-        purchases: num(d.total_purchases_imputed),
-        net,
+        incomes, charges, savings, purchases,
+        net: endBal - startBal,
+        patrimoine: cumulative,
       };
-    }
-    // Filtre actif → on agrège seulement sur les comptes sélectionnés
-    const accs = d.accounts.filter((a) => filteredAccountIds.has(a.account_id));
-    const incomes = accs.reduce((s, a) => s + num(a.incomes), 0);
-    const charges = -accs.reduce((s, a) => s + num(a.charges), 0); // a.charges est négatif
-    const savings = -accs.reduce((s, a) => s + num(a.savings), 0);
-    const purchases = -accs.reduce((s, a) => s + num(a.purchases), 0);
-    // Delta réel = final - initial du sous-ensemble de comptes filtrés
-    const startBal = accs.reduce((s, a) => s + num(a.initial_balance), 0);
-    const endBal = accs.reduce((s, a) => s + num(a.final_balance), 0);
-    return {
-      m: MONTHS_SHORT[d.month - 1],
-      incomes,
-      charges,
-      savings,
-      purchases,
-      net: endBal - startBal,
-    };
-  });
+    });
+  }, [query.data, filteredAccountIds]);
 
   const totalIn = months.reduce((s, x) => s + x.incomes, 0);
   const totalCh = months.reduce((s, x) => s + x.charges, 0);
