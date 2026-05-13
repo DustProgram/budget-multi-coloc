@@ -27,7 +27,10 @@ from models import (
 )
 from services.access import user_can_write_account
 from services.ai_chat import AIChatError
-from services.llm_client import LLMError, get_llm_client, is_llm_available
+from services.llm_client import (
+    LLMError, RateLimitError, VisionResult,
+    check_rate_limits, get_llm_client, is_llm_available, record_usage,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -66,12 +69,17 @@ def _hash_signature(date_iso: str, amount: Decimal, marchand: str) -> str:
     return hashlib.sha256(raw.encode()).hexdigest()[:16]
 
 
-def analyze_image(image_b64: str, mime_type: str, source_type: str) -> dict:
+def analyze_image(
+    image_b64: str, mime_type: str, source_type: str,
+    db=None, user_id: Optional[int] = None,
+) -> dict:
     """Envoie l'image au LLM configuré (Anthropic/OpenAI/Gemini) et retourne
     le JSON parsé.
 
     image_b64 : contenu base64 SANS le préfixe "data:..."
     mime_type : "image/jpeg" | "image/png" | "image/webp"
+    db, user_id : si fournis, le rate-limit local est appliqué et l'usage
+                  est enregistré.
     """
     if not is_llm_available():
         raise AIChatError(
@@ -83,8 +91,13 @@ def analyze_image(image_b64: str, mime_type: str, source_type: str) -> dict:
         client = get_llm_client()
     except LLMError as e:
         raise AIChatError(str(e))
+    if db is not None:
+        try:
+            check_rate_limits(db)
+        except RateLimitError as e:
+            raise AIChatError(str(e))
     try:
-        text = client.vision(
+        vr: VisionResult = client.vision(
             image_b64=image_b64,
             mime_type=mime_type,
             prompt="Analyse cette image et renvoie le JSON demandé.",
@@ -94,7 +107,13 @@ def analyze_image(image_b64: str, mime_type: str, source_type: str) -> dict:
     except LLMError as e:
         logger.exception("Vision error")
         raise AIChatError(str(e))
-    # Claude peut wrap dans ```json ... ``` malgré l'instruction
+    if db is not None and user_id is not None:
+        # Enregistre l'usage (on réutilise LLMResponse pour le helper)
+        from services.llm_client import LLMResponse as _R
+        record_usage(db, user_id,
+                     _R(input_tokens=vr.input_tokens, output_tokens=vr.output_tokens),
+                     kind="vision")
+    text = vr.text
     if text.startswith("```"):
         text = text.split("```", 2)[1]
         if text.startswith("json"):

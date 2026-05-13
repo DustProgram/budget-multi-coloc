@@ -19,10 +19,16 @@ export function Chat() {
   const [activeId, setActiveId] = useState<number | null>(null);
   const [input, setInput] = useState('');
 
+  interface StatusOut {
+    available: boolean;
+    provider?: string;
+    model?: string;
+    limits?: { rpm: number; tpm: number; rpd: number };
+    usage?: { minute_requests: number; minute_tokens: number; day_requests: number; day_tokens: number };
+  }
   const status = useQuery({
     queryKey: ['chat', 'status'],
-    queryFn: async () =>
-      (await api.get<{ available: boolean; provider?: string; model?: string }>('/chat/status')).data,
+    queryFn: async () => (await api.get<StatusOut>('/chat/status')).data,
   });
   const providerLabel = status.data?.provider
     ? `${status.data.provider} · ${status.data.model || 'défaut'}`
@@ -119,6 +125,9 @@ export function Chat() {
         </Button>
       </PageHeader>
 
+      <UsageBar status={status.data} />
+
+
       <div className="grid" style={{ gridTemplateColumns: '260px 1fr', gap: 16 }}>
         <Card style={{ padding: 8, height: 'fit-content', maxHeight: '70vh', overflowY: 'auto' }}>
           {conversations.isLoading && <Loader />}
@@ -185,7 +194,7 @@ export function Chat() {
             )}
             {send.isPending && (
               <p className="small muted" style={{ textAlign: 'center', marginTop: 8 }}>
-                Claude réfléchit…
+                L'IA réfléchit…
               </p>
             )}
             {send.isError && (
@@ -359,6 +368,48 @@ function statusLabel(s: ChatAction['status']): string {
 
 function canUndo(a: ChatAction): boolean {
   return !!a.entity_type && !!a.entity_id && ['purchase', 'charge', 'income', 'shopping_item'].includes(a.entity_type);
+}
+
+function UsageBar({ status }: {
+  status?: {
+    limits?: { rpm: number; tpm: number; rpd: number };
+    usage?: { minute_requests: number; minute_tokens: number; day_requests: number; day_tokens: number };
+  };
+}) {
+  if (!status?.usage) return null;
+  const { limits, usage } = status;
+  const items: Array<{ label: string; used: number; limit: number; unit?: string }> = [];
+  if (limits) {
+    if (limits.rpm > 0) items.push({ label: 'req/min', used: usage.minute_requests, limit: limits.rpm });
+    if (limits.tpm > 0) items.push({ label: 'tokens/min', used: usage.minute_tokens, limit: limits.tpm });
+    if (limits.rpd > 0) items.push({ label: 'req/jour', used: usage.day_requests, limit: limits.rpd });
+  }
+  // Toujours afficher le total du jour, même sans limite (pour info)
+  const showRaw = items.length === 0;
+  return (
+    <div className="row gap-2" style={{ flexWrap: 'wrap', marginBottom: 16, fontSize: 12 }}>
+      {items.map((it) => {
+        const ratio = it.limit > 0 ? Math.min(100, (it.used / it.limit) * 100) : 0;
+        const color = ratio >= 90 ? 'var(--rose)' : ratio >= 70 ? 'var(--amber)' : 'var(--sage)';
+        return (
+          <div key={it.label} style={{
+            border: '1px solid var(--line)', borderRadius: 8, padding: '4px 10px',
+            display: 'inline-flex', alignItems: 'center', gap: 8, background: 'var(--bg-elev)',
+          }}>
+            <span className="muted">{it.label}</span>
+            <strong style={{ color }}>{it.used.toLocaleString('fr-FR')}</strong>
+            <span className="muted">/ {it.limit.toLocaleString('fr-FR')}</span>
+          </div>
+        );
+      })}
+      {showRaw && (
+        <span className="muted small">
+          Aujourd'hui : {usage.day_requests} req · {usage.day_tokens.toLocaleString('fr-FR')} tokens
+          <em style={{ marginLeft: 8 }}>(aucune limite configurée)</em>
+        </span>
+      )}
+    </div>
+  );
 }
 
 function describeAction(name: string, input: Record<string, unknown>): string {

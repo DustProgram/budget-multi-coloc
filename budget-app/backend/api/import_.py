@@ -51,7 +51,7 @@ async def analyze(
     image: UploadFile = File(...),
     db: Session = Depends(get_db),
 ):
-    _user: User = request.state.user  # noqa: F841  — auth requise (middleware)
+    user: User = request.state.user
     if image.content_type not in ALLOWED_MIME:
         raise HTTPException(400, f"Type d'image non supporté : {image.content_type}")
     data = await image.read()
@@ -62,7 +62,7 @@ async def analyze(
     if mime == "image/jpg":
         mime = "image/jpeg"
     try:
-        parsed = ai_import.analyze_image(b64, mime, source_type)
+        parsed = ai_import.analyze_image(b64, mime, source_type, db=db, user_id=user.id)
     except AIChatError as e:
         raise HTTPException(503, str(e))
     return {"source_type": source_type, "parsed": parsed}

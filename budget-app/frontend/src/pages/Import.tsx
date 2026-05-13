@@ -110,7 +110,7 @@ export function Import() {
       <PageHeader
         eyebrow="Import auto"
         title="Scanne un ticket ou une facture"
-        subtitle="Photographie ton ticket, Claude lit les infos et te propose l'achat à valider. Tu peux annuler tout un import si la lecture est foireuse."
+        subtitle="Photographie ton ticket, l'IA lit les infos et te propose l'achat à valider. Tu peux annuler tout un import si la lecture est foireuse."
       />
 
       <div className="grid" style={{ gridTemplateColumns: '1fr 1fr', gap: 16, marginBottom: 24 }}>
@@ -159,7 +159,7 @@ export function Import() {
           </div>
           {analyze.isPending && (
             <div className="row gap-2" style={{ marginTop: 12, justifyContent: 'center' }}>
-              <Loader /> <span className="small muted">Claude analyse l'image…</span>
+              <Loader /> <span className="small muted">L'IA analyse l'image…</span>
             </div>
           )}
           {analyze.isError && (
@@ -268,7 +268,7 @@ function PreviewCard({
     <Card>
       <div className="card-head">
         <div>
-          <div className="card-title">Claude a lu ça</div>
+          <div className="card-title">L'IA a lu ça</div>
           <div className="card-sub">Vérifie et corrige si besoin avant de valider.</div>
         </div>
         <button

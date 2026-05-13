@@ -37,13 +37,27 @@ logger = logging.getLogger(__name__)
 # ============================================================
 
 @dataclass
+class VisionResult:
+    text: str
+    input_tokens: int = 0
+    output_tokens: int = 0
+
+
+@dataclass
 class LLMResponse:
     text: Optional[str] = None
     tool_calls: list[dict] = field(default_factory=list)
     stop_reason: str = "end_turn"
+    input_tokens: int = 0
+    output_tokens: int = 0
 
 
 class LLMError(Exception):
+    pass
+
+
+class RateLimitError(LLMError):
+    """Limite locale dépassée (RPM, TPM ou RPD configurée par l'user)."""
     pass
 
 
@@ -68,6 +82,13 @@ def _load_ha_options() -> dict:
         return {}
 
 
+def _safe_int(v, default=0) -> int:
+    try:
+        return int(v) if v not in (None, "") else default
+    except (ValueError, TypeError):
+        return default
+
+
 def get_llm_config() -> dict:
     """Lit la config LLM depuis env > options HA > défaut.
 
@@ -80,8 +101,6 @@ def get_llm_config() -> dict:
     model = (os.environ.get("LLM_MODEL") or opts.get("llm_model") or "").strip()
     base_url = (os.environ.get("LLM_BASE_URL") or opts.get("llm_base_url") or "").strip()
 
-    # Compat : si pas de provider ou pas de clé, on retombe sur l'ancienne
-    # config claude_api_key
     legacy_key = (os.environ.get("CLAUDE_API_KEY") or opts.get("claude_api_key") or "").strip()
     if not api_key and legacy_key:
         api_key = legacy_key
@@ -95,12 +114,101 @@ def get_llm_config() -> dict:
     if not model:
         model = DEFAULT_MODELS[provider]
 
+    rpm = _safe_int(os.environ.get("LLM_RPM_LIMIT") or opts.get("llm_rpm_limit"))
+    tpm = _safe_int(os.environ.get("LLM_TPM_LIMIT") or opts.get("llm_tpm_limit"))
+    rpd = _safe_int(os.environ.get("LLM_RPD_LIMIT") or opts.get("llm_rpd_limit"))
+
     return {
         "provider": provider,
         "api_key": api_key,
         "model": model,
         "base_url": base_url,
+        "rpm_limit": rpm,
+        "tpm_limit": tpm,
+        "rpd_limit": rpd,
     }
+
+
+# ============================================================
+# Rate-limiting (basé sur la table LLMUsage)
+# ============================================================
+
+def get_usage_window(db) -> dict:
+    """Renvoie l'usage actuel : requêtes/tokens sur la dernière minute
+    et sur le jour courant (UTC)."""
+    from datetime import datetime, timedelta, timezone
+    from sqlalchemy import func
+    from models import LLMUsage
+
+    now = datetime.utcnow()
+    minute_ago = now - timedelta(minutes=1)
+    today_start = datetime.combine(now.date(), datetime.min.time())
+
+    minute_row = (
+        db.query(
+            func.count(LLMUsage.id),
+            func.coalesce(func.sum(LLMUsage.input_tokens + LLMUsage.output_tokens), 0),
+        )
+        .filter(LLMUsage.timestamp >= minute_ago)
+        .one()
+    )
+    day_row = (
+        db.query(
+            func.count(LLMUsage.id),
+            func.coalesce(func.sum(LLMUsage.input_tokens + LLMUsage.output_tokens), 0),
+        )
+        .filter(LLMUsage.timestamp >= today_start)
+        .one()
+    )
+    return {
+        "minute_requests": int(minute_row[0] or 0),
+        "minute_tokens": int(minute_row[1] or 0),
+        "day_requests": int(day_row[0] or 0),
+        "day_tokens": int(day_row[1] or 0),
+    }
+
+
+def check_rate_limits(db) -> None:
+    """Lève RateLimitError si une limite locale serait dépassée par un nouvel
+    appel. À appeler AVANT d'invoquer le client LLM."""
+    cfg = get_llm_config()
+    usage = get_usage_window(db)
+    if cfg["rpm_limit"] > 0 and usage["minute_requests"] >= cfg["rpm_limit"]:
+        raise RateLimitError(
+            f"Limite RPM atteinte ({usage['minute_requests']}/{cfg['rpm_limit']}). "
+            "Réessaie dans 1 minute.",
+        )
+    if cfg["tpm_limit"] > 0 and usage["minute_tokens"] >= cfg["tpm_limit"]:
+        raise RateLimitError(
+            f"Limite TPM atteinte ({usage['minute_tokens']}/{cfg['tpm_limit']} tokens). "
+            "Réessaie dans 1 minute.",
+        )
+    if cfg["rpd_limit"] > 0 and usage["day_requests"] >= cfg["rpd_limit"]:
+        raise RateLimitError(
+            f"Limite quotidienne atteinte ({usage['day_requests']}/{cfg['rpd_limit']}). "
+            "Réessaie demain.",
+        )
+
+
+def record_usage(
+    db,
+    user_id: int,
+    response: LLMResponse,
+    kind: str = "chat",
+) -> None:
+    """Enregistre une ligne d'usage en DB après un appel réussi."""
+    from models import LLMUsage
+    cfg = get_llm_config()
+    row = LLMUsage(
+        user_id=user_id,
+        provider=cfg["provider"],
+        model=cfg["model"],
+        input_tokens=int(response.input_tokens or 0),
+        output_tokens=int(response.output_tokens or 0),
+        kind=kind,
+    )
+    db.add(row)
+    db.commit()
 
 
 def is_llm_available() -> bool:
@@ -129,8 +237,8 @@ class LLMClient:
         prompt: str,
         system: str,
         max_tokens: int = 1024,
-    ) -> str:
-        """Analyse une image, retourne le texte de réponse brut."""
+    ) -> "VisionResult":
+        """Analyse une image, retourne VisionResult avec text + usage tokens."""
         raise NotImplementedError
 
 
@@ -186,13 +294,16 @@ class AnthropicAdapter(LLMClient):
                 text_parts.append(block.text)
             elif block.type == "tool_use":
                 tool_calls.append({"id": block.id, "name": block.name, "input": block.input})
+        usage = getattr(resp, "usage", None)
         return LLMResponse(
             text="\n".join(t for t in text_parts if t).strip() or None,
             tool_calls=tool_calls,
             stop_reason=resp.stop_reason or "end_turn",
+            input_tokens=getattr(usage, "input_tokens", 0) if usage else 0,
+            output_tokens=getattr(usage, "output_tokens", 0) if usage else 0,
         )
 
-    def vision(self, image_b64, mime_type, prompt, system, max_tokens=1024) -> str:
+    def vision(self, image_b64, mime_type, prompt, system, max_tokens=1024):
         try:
             resp = self.client.messages.create(
                 model=self.model,
@@ -210,7 +321,13 @@ class AnthropicAdapter(LLMClient):
             )
         except Exception as e:
             raise LLMError(f"Anthropic vision error: {e}")
-        return "".join(b.text for b in resp.content if b.type == "text").strip()
+        text = "".join(b.text for b in resp.content if b.type == "text").strip()
+        usage = getattr(resp, "usage", None)
+        return VisionResult(
+            text=text,
+            input_tokens=getattr(usage, "input_tokens", 0) if usage else 0,
+            output_tokens=getattr(usage, "output_tokens", 0) if usage else 0,
+        )
 
 
 # ============================================================
@@ -314,9 +431,14 @@ class OpenAIAdapter(LLMClient):
                 args = {}
             tool_calls.append({"id": tc.id, "name": tc.function.name, "input": args})
         stop = "tool_use" if tool_calls else (choice.finish_reason or "end_turn")
-        return LLMResponse(text=text, tool_calls=tool_calls, stop_reason=stop)
+        usage = getattr(resp, "usage", None)
+        return LLMResponse(
+            text=text, tool_calls=tool_calls, stop_reason=stop,
+            input_tokens=getattr(usage, "prompt_tokens", 0) if usage else 0,
+            output_tokens=getattr(usage, "completion_tokens", 0) if usage else 0,
+        )
 
-    def vision(self, image_b64, mime_type, prompt, system, max_tokens=1024) -> str:
+    def vision(self, image_b64, mime_type, prompt, system, max_tokens=1024):
         try:
             resp = self.client.chat.completions.create(
                 model=self.model,
@@ -333,7 +455,13 @@ class OpenAIAdapter(LLMClient):
             )
         except Exception as e:
             raise LLMError(f"OpenAI vision error: {e}")
-        return (resp.choices[0].message.content or "").strip()
+        text = (resp.choices[0].message.content or "").strip()
+        usage = getattr(resp, "usage", None)
+        return VisionResult(
+            text=text,
+            input_tokens=getattr(usage, "prompt_tokens", 0) if usage else 0,
+            output_tokens=getattr(usage, "completion_tokens", 0) if usage else 0,
+        )
 
 
 # ============================================================
@@ -441,13 +569,16 @@ class GeminiAdapter(LLMClient):
                         "input": args,
                     })
         stop = "tool_use" if tool_calls else "end_turn"
+        um = getattr(resp, "usage_metadata", None)
         return LLMResponse(
             text="\n".join(t for t in text_parts if t).strip() or None,
             tool_calls=tool_calls,
             stop_reason=stop,
+            input_tokens=getattr(um, "prompt_token_count", 0) if um else 0,
+            output_tokens=getattr(um, "candidates_token_count", 0) if um else 0,
         )
 
-    def vision(self, image_b64, mime_type, prompt, system, max_tokens=1024) -> str:
+    def vision(self, image_b64, mime_type, prompt, system, max_tokens=1024):
         import base64 as _b64
         model = self.genai.GenerativeModel(
             self.model_name,
@@ -461,7 +592,13 @@ class GeminiAdapter(LLMClient):
             ])
         except Exception as e:
             raise LLMError(f"Gemini vision error: {e}")
-        return (resp.text or "").strip()
+        text = (resp.text or "").strip()
+        um = getattr(resp, "usage_metadata", None)
+        return VisionResult(
+            text=text,
+            input_tokens=getattr(um, "prompt_token_count", 0) if um else 0,
+            output_tokens=getattr(um, "candidates_token_count", 0) if um else 0,
+        )
 
 
 def _clean_schema_for_gemini(schema: dict) -> dict:

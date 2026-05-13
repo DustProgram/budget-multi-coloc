@@ -179,12 +179,19 @@ async def undo_action(
 
 
 @router.get("/status")
-async def chat_status(request: Request):
-    """Renvoie le provider LLM actif et si une clé est configurée."""
-    from services.llm_client import get_llm_config
+async def chat_status(request: Request, db: Session = Depends(get_db)):
+    """Renvoie provider, modèle, limites configurées et usage courant."""
+    from services.llm_client import get_llm_config, get_usage_window
     cfg = get_llm_config()
+    usage = get_usage_window(db)
     return {
         "available": bool(cfg.get("api_key")),
         "provider": cfg.get("provider"),
         "model": cfg.get("model"),
+        "limits": {
+            "rpm": cfg.get("rpm_limit") or 0,
+            "tpm": cfg.get("tpm_limit") or 0,
+            "rpd": cfg.get("rpd_limit") or 0,
+        },
+        "usage": usage,
     }
