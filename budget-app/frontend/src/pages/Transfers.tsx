@@ -188,6 +188,7 @@ export function Transfers() {
       )}
 
       <TransferModal
+        key={editing ? `${editing.kind}-${editing.data.id}` : 'new'}
         open={creating || !!editing}
         existing={editing}
         kind={editing?.kind ?? tab}

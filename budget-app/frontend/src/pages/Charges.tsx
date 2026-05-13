@@ -119,6 +119,7 @@ export function Charges() {
       )}
 
       <ChargeModal
+        key={editing?.id ?? 'new'}
         open={creating || !!editing}
         existing={editing}
         onClose={() => { setCreating(false); setEditing(null); }}

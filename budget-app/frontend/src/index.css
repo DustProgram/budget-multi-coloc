@@ -548,6 +548,32 @@ input, select, textarea { font-family: inherit; font-size: inherit; color: inher
   /* Margin auto pour rester centré même quand on scroll dans l'overlay */
   margin: auto;
 }
+/* Shake quand l'user clique en-dehors : signale "utilise Annuler" */
+.modal-content.shaking {
+  animation: modal-shake 0.5s cubic-bezier(0.36, 0.07, 0.19, 0.97);
+}
+.modal-content.shaking .btn:not(.primary):not(.sm) {
+  animation: modal-cancel-flash 0.5s ease-in-out;
+}
+@keyframes modal-shake {
+  10%, 90% { transform: translate3d(-1px, 0, 0); }
+  20%, 80% { transform: translate3d(2px, 0, 0); }
+  30%, 50%, 70% { transform: translate3d(-4px, 0, 0); }
+  40%, 60% { transform: translate3d(4px, 0, 0); }
+}
+@keyframes modal-cancel-flash {
+  0%, 100% {
+    background: var(--bg-elev);
+    border-color: var(--line);
+    transform: scale(1);
+  }
+  50% {
+    background: var(--accent-bg);
+    border-color: var(--accent);
+    color: var(--accent);
+    transform: scale(1.04);
+  }
+}
 
 /* === Responsive === */
 @media (max-width: 920px) {
