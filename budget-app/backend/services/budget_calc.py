@@ -78,10 +78,19 @@ def compute_my_share(charge: Charge) -> Decimal:
 
 def _in_validity_window(obj, year: int, month: int) -> bool:
     """Vérifie qu'un objet (charge/income/transfer/saving) avec champs
-    optionnels valid_from / valid_to est actif sur le mois (year, month)."""
+    optionnels valid_from / valid_to est actif sur le mois (year, month).
+
+    Si valid_from n'est pas défini, on utilise `created_at` comme valid_from
+    implicite : un revenu/charge saisi le 13 mai 2026 n'est PAS rétroactif
+    sur les mois antérieurs.
+    """
     vf = getattr(obj, "valid_from", None)
     vt = getattr(obj, "valid_to", None)
-    # Mois cible : on prend le 1er jour
+    if vf is None:
+        # Fallback : utiliser la date de création comme valid_from implicite
+        ca = getattr(obj, "created_at", None)
+        if ca is not None:
+            vf = ca.date() if hasattr(ca, "date") else ca
     from datetime import date as _date
     target_start = _date(year, month, 1)
     if month == 12:
