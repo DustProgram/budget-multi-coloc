@@ -1,5 +1,5 @@
 name: "Budget Multi-Coloc"
-version: "0.7.0"
+version: "0.8.0"
 slug: "budget_multi_coloc"
 description: "Gestionnaire de budget personnel et colocation avec stockage chiffré"
 url: "https://github.com/DustProgram/budget-multi-coloc/tree/main/budget-app"
@@ -73,6 +73,22 @@ options:
     - "coloc-summary"
   default_currency: "EUR"
   default_locale: "fr_FR"
+  # === IA (chat assistant + import vision) ===
+  # Choisis ton fournisseur LLM. Si vide, les fonctions IA sont désactivées
+  # mais l'app marche très bien (notamment l'import Excel).
+  llm_provider: "anthropic"
+  llm_api_key: ""
+  # Modèle à utiliser. Laisser vide pour le défaut du provider :
+  #   anthropic → claude-haiku-4-5-20251001
+  #   openai    → gpt-4o-mini
+  #   gemini    → gemini-2.5-flash
+  llm_model: ""
+  # URL custom (utile pour OpenRouter, Groq, Mistral, Ollama local).
+  # Ex OpenRouter : https://openrouter.ai/api/v1
+  # Ex Groq      : https://api.groq.com/openai/v1
+  # Ex Ollama    : http://homeassistant.local:11434/v1
+  llm_base_url: ""
+  # Compatibilité ascendante : ancienne option claude_api_key
   claude_api_key: ""
 
 schema:
@@ -86,4 +102,8 @@ schema:
     - "list(courses|coloc-summary)"
   default_currency: "list(EUR|USD|GBP|CHF)"
   default_locale: "list(fr_FR|en_US)"
+  llm_provider: "list(anthropic|openai|gemini)"
+  llm_api_key: "password?"
+  llm_model: "str?"
+  llm_base_url: "str?"
   claude_api_key: "password?"

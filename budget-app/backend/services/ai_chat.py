@@ -17,20 +17,31 @@ from __future__ import annotations
 
 import json
 import logging
-import os
 from datetime import datetime
-from pathlib import Path
 from typing import Any, Optional
 
 from sqlalchemy.orm import Session
 
 from models import ChatAction, ChatConversation, ChatMessage, User
 from services import ai_tools
+from services.llm_client import (
+    LLMError, get_llm_client, get_llm_config, is_llm_available,
+)
 
 logger = logging.getLogger(__name__)
 
-CLAUDE_MODEL = "claude-haiku-4-5-20251001"
 MAX_TURNS = 6
+
+# Compat ascendante : le module ai_chat exposait CLAUDE_MODEL et
+# get_claude_api_key(). On garde les noms pour les autres services qui les
+# importent encore.
+CLAUDE_MODEL = "claude-haiku-4-5-20251001"  # défaut historique, ignoré par le client unifié
+
+
+def get_claude_api_key() -> Optional[str]:
+    """Compat : renvoie la clé LLM configurée, peu importe le provider."""
+    cfg = get_llm_config()
+    return cfg.get("api_key") or None
 
 SYSTEM_PROMPT = """Tu es l'assistant intégré à l'app Budget Multi-Coloc, un outil de gestion budgétaire personnel et partagé en colocation.
 
@@ -46,29 +57,6 @@ Règles :
 - Si une action coûte ≥ 50€ ou ajoute un revenu, l'utilisateur devra confirmer côté UI (tu n'as pas besoin de demander, ça s'affiche automatiquement). Annonce simplement que tu attends sa validation.
 - Ne fabrique pas de chiffres : utilise `get_dashboard` ou les listings pour avoir des montants exacts.
 """
-
-
-def _load_options() -> dict:
-    """Lit /data/options.json (config HA add-on) si présent, sinon dict vide."""
-    p = Path("/data/options.json")
-    if p.exists():
-        try:
-            return json.loads(p.read_text())
-        except Exception as e:
-            logger.warning("Impossible de lire /data/options.json: %s", e)
-    return {}
-
-
-def get_claude_api_key() -> Optional[str]:
-    """Priorité : env CLAUDE_API_KEY (dev), sinon options HA."""
-    env_key = os.environ.get("CLAUDE_API_KEY")
-    if env_key:
-        return env_key.strip() or None
-    options = _load_options()
-    key = options.get("claude_api_key") or options.get("anthropic_api_key")
-    if key:
-        return str(key).strip() or None
-    return None
 
 
 def _serialize_history(messages: list[ChatMessage]) -> list[dict]:
@@ -143,12 +131,17 @@ def _persist_tool_result(
     tool_use_id: str,
     content: Any,
     is_error: bool = False,
+    tool_name: Optional[str] = None,
 ) -> ChatMessage:
     payload = {
         "tool_use_id": tool_use_id,
         "content": content if isinstance(content, str) else json.dumps(content, default=str),
         "is_error": is_error,
     }
+    # Stocker aussi le nom de l'outil pour les providers qui en ont besoin
+    # (Gemini : function_response.name doit matcher le function_call.name).
+    if tool_name:
+        payload["_tool_name"] = tool_name
     msg = ChatMessage(
         conversation_id=conv.id,
         role="tool_result",
@@ -175,21 +168,14 @@ def run_chat_turn(
 
     Retourne {"messages": [...], "actions": [...]} pour le frontend.
     """
-    api_key = get_claude_api_key()
-    if not api_key:
+    if not is_llm_available():
         raise AIChatError(
-            "Pas de clé Claude API configurée. Renseigne-la dans Paramètres > Add-on > Configuration."
+            "Pas de clé LLM configurée. Renseigne llm_api_key dans Paramètres > Add-on > Configuration."
         )
-
-    # Import à l'intérieur pour ne pas crasher si la dépendance est absente en dev
     try:
-        from anthropic import Anthropic
-    except ImportError as e:
-        raise AIChatError(
-            "Le SDK Anthropic n'est pas installé. Ajoute `anthropic` à requirements.txt."
-        ) from e
-
-    client = Anthropic(api_key=api_key)
+        client = get_llm_client()
+    except LLMError as e:
+        raise AIChatError(str(e))
 
     # 1) Stocker le message utilisateur
     user_msg = ChatMessage(conversation_id=conv.id, role="user", content=user_text)
@@ -211,31 +197,18 @@ def run_chat_turn(
         messages_for_api = _serialize_history(history)
 
         try:
-            response = client.messages.create(
-                model=CLAUDE_MODEL,
-                max_tokens=2048,
+            response = client.chat(
+                messages=messages_for_api,
                 system=SYSTEM_PROMPT,
                 tools=ai_tools.TOOL_DEFINITIONS,
-                messages=messages_for_api,
+                max_tokens=2048,
             )
-        except Exception as e:
-            logger.exception("Erreur Claude API")
-            raise AIChatError(f"Erreur Claude API : {e}")
+        except LLMError as e:
+            logger.exception("Erreur LLM")
+            raise AIChatError(str(e))
 
-        text_parts = []
-        tool_uses = []
-        for block in response.content:
-            if block.type == "text":
-                text_parts.append(block.text)
-            elif block.type == "tool_use":
-                tool_uses.append({
-                    "id": block.id,
-                    "name": block.name,
-                    "input": block.input,
-                })
-
-        assistant_text = "\n".join(t for t in text_parts if t).strip() or None
-        assistant_msg = _persist_assistant_message(db, conv, assistant_text, tool_uses)
+        tool_uses = response.tool_calls
+        assistant_msg = _persist_assistant_message(db, conv, response.text, tool_uses)
         new_messages.append(assistant_msg)
 
         if response.stop_reason != "tool_use" or not tool_uses:
@@ -269,6 +242,7 @@ def run_chat_turn(
                         "action_id": action.id,
                         "message": "Action mise en attente — confirmation utilisateur requise (montant ≥ 50€ ou revenu).",
                     },
+                    tool_name=tool_name,
                 )
                 any_pending = True
             else:
@@ -289,13 +263,14 @@ def run_chat_turn(
                     db.commit()
                     db.refresh(action)
                     new_actions.append(action)
-                    _persist_tool_result(db, conv, tu["id"], result)
+                    _persist_tool_result(db, conv, tu["id"], result, tool_name=tool_name)
                 except Exception as e:
                     logger.exception("Erreur outil %s", tool_name)
                     _persist_tool_result(
                         db, conv, tu["id"],
                         {"status": "error", "message": str(e)},
                         is_error=True,
+                        tool_name=tool_name,
                     )
 
         if any_pending:
