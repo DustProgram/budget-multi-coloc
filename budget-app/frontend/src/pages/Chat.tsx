@@ -128,8 +128,8 @@ export function Chat() {
       <UsageBar status={status.data} />
 
 
-      <div className="grid" style={{ gridTemplateColumns: '260px 1fr', gap: 16 }}>
-        <Card style={{ padding: 8, height: 'fit-content', maxHeight: '70vh', overflowY: 'auto' }}>
+      <div className="chat-shell">
+        <Card className="chat-sidebar">
           {conversations.isLoading && <Loader />}
           {conversations.data && conversations.data.length === 0 && (
             <p className="small muted" style={{ padding: 12 }}>
@@ -173,8 +173,8 @@ export function Chat() {
           ))}
         </Card>
 
-        <Card style={{ display: 'flex', flexDirection: 'column', minHeight: '60vh' }}>
-          <div style={{ flex: 1, overflowY: 'auto', padding: 4, marginBottom: 12 }}>
+        <Card className="chat-panel">
+          <div className="chat-scroll">
             {!activeId && (
               <div style={{ padding: 24, textAlign: 'center', color: 'var(--ink-3)' }}>
                 <Sparkles size={28} style={{ opacity: 0.5 }} />
@@ -187,26 +187,23 @@ export function Chat() {
             {conv.data && (
               <MessageList
                 dump={conv.data}
+                pendingUserMessage={send.isPending ? send.variables ?? null : null}
+                pendingAssistant={send.isPending}
                 onActionDone={() =>
                   qc.invalidateQueries({ queryKey: ['chat', 'conversation', activeId] })
                 }
               />
-            )}
-            {send.isPending && (
-              <p className="small muted" style={{ textAlign: 'center', marginTop: 8 }}>
-                L'IA réfléchit…
-              </p>
             )}
             {send.isError && (
               <ErrorBox message={send.error instanceof Error ? send.error.message : 'Erreur'} />
             )}
           </div>
 
-          <form onSubmit={onSubmit} className="row gap-2">
+          <form onSubmit={onSubmit} className="chat-input row gap-2">
             <input
               className="input"
               style={{ flex: 1 }}
-              placeholder="Ex: 'combien je peux dépenser ce mois ?' ou 'ajoute 5€ de pain'"
+              placeholder="Ex: 'combien me reste ce mois ?' ou 'ajoute 5€ de pain'"
               value={input}
               onChange={(e) => setInput(e.target.value)}
               disabled={send.isPending}
@@ -223,10 +220,12 @@ export function Chat() {
 }
 
 function MessageList({
-  dump, onActionDone,
+  dump, onActionDone, pendingUserMessage, pendingAssistant,
 }: {
   dump: ConversationDump;
   onActionDone: () => void;
+  pendingUserMessage?: string | null;
+  pendingAssistant?: boolean;
 }) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const actionsByMessageId = new Map<number, ChatAction[]>();
@@ -236,9 +235,15 @@ function MessageList({
     actionsByMessageId.set(a.message_id, list);
   }
 
+  // Si le dernier message est de l'user et qu'on est en attente, on ne le
+  // duplique pas avec le pending optimiste.
+  const lastMsg = dump.messages[dump.messages.length - 1];
+  const showPendingUser = !!pendingUserMessage
+    && (!lastMsg || lastMsg.role !== 'user' || lastMsg.content !== pendingUserMessage);
+
   useEffect(() => {
-    scrollRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [dump.messages.length]);
+    scrollRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' });
+  }, [dump.messages.length, pendingAssistant]);
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
@@ -254,7 +259,35 @@ function MessageList({
           </div>
         );
       })}
+      {showPendingUser && (
+        <MessageBubble msg={{
+          id: -1,
+          conversation_id: 0,
+          role: 'user',
+          content: pendingUserMessage!,
+          tool_calls: null,
+          created_at: new Date().toISOString(),
+        }} />
+      )}
+      {pendingAssistant && <TypingBubble />}
       <div ref={scrollRef} />
+    </div>
+  );
+}
+
+function TypingBubble() {
+  return (
+    <div style={{ display: 'flex', justifyContent: 'flex-start', alignItems: 'center', gap: 8 }}>
+      <div style={{
+        padding: '10px 14px', borderRadius: 14,
+        background: 'var(--bg-2)',
+        display: 'inline-flex', alignItems: 'center', gap: 4,
+      }}>
+        <span className="chat-typing-dot" />
+        <span className="chat-typing-dot" style={{ animationDelay: '0.15s' }} />
+        <span className="chat-typing-dot" style={{ animationDelay: '0.3s' }} />
+      </div>
+      <span className="small muted">L'IA réfléchit…</span>
     </div>
   );
 }
