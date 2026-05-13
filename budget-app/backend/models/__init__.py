@@ -194,6 +194,9 @@ class Income(Base):
     # ou revenus temporaires sans perdre l'historique.
     valid_from = Column(Date, nullable=True)
     valid_to = Column(Date, nullable=True)
+    # Date de création — sert de valid_from implicite si non défini, pour
+    # éviter qu'un revenu saisi aujourd'hui apparaisse rétroactivement.
+    created_at = Column(DateTime, default=datetime.utcnow)
 
     user = relationship("User", backref="incomes")
     account = relationship("Account")
@@ -224,6 +227,7 @@ class Charge(Base):
     # ou expirent (ex : abonnement Netflix de mars à juillet seulement).
     valid_from = Column(Date, nullable=True)
     valid_to = Column(Date, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
 
     user = relationship("User", backref="charges")
     account = relationship("Account")
@@ -268,6 +272,7 @@ class RecurringTransfer(Base):
     notes = Column(Text, nullable=True)
     valid_from = Column(Date, nullable=True)
     valid_to = Column(Date, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
 
 
 class OneTimeTransfer(Base):
@@ -301,6 +306,7 @@ class AutoSaving(Base):
     notes = Column(Text, nullable=True)
     valid_from = Column(Date, nullable=True)
     valid_to = Column(Date, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
 
 
 # ============================================================

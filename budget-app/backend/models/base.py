@@ -83,6 +83,9 @@ def init_db():
     for tbl in ("incomes", "charges", "recurring_transfers", "auto_savings"):
         _migrate_add_column_if_missing(tbl, "valid_from", "DATE")
         _migrate_add_column_if_missing(tbl, "valid_to", "DATE")
+        # created_at sert de valid_from implicite si non défini → évite
+        # qu'un revenu/charge saisi aujourd'hui pollue les mois passés.
+        _migrate_add_column_if_missing(tbl, "created_at", "DATETIME")
 
     # Override LLM dans Settings (0.9.4) — surcharge la config.yaml depuis l'UI
     _migrate_add_column_if_missing("settings", "llm_provider", "VARCHAR(40)")
