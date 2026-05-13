@@ -1,5 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
 import { Sparkles, Send, Plus, Trash2, Check, X, Undo2, AlertCircle } from 'lucide-react';
 import { api } from '../lib/api';
 import { eur } from '../lib/format';
@@ -294,19 +296,19 @@ function TypingBubble() {
 
 function MessageBubble({ msg }: { msg: ChatMessage }) {
   const isUser = msg.role === 'user';
+  const content = msg.content || '';
   return (
     <div style={{ display: 'flex', justifyContent: isUser ? 'flex-end' : 'flex-start' }}>
-      <div style={{
-        maxWidth: '78%',
-        padding: '10px 14px', borderRadius: 14,
-        background: isUser ? 'var(--terra)' : 'var(--bg-2)',
-        color: isUser ? '#fff' : 'inherit',
-        whiteSpace: 'pre-wrap',
-        fontSize: 14, lineHeight: 1.45,
-      }}>
-        {msg.content || (msg.tool_calls && msg.tool_calls.length > 0
-          ? <span className="muted small">[appel d'outil : {msg.tool_calls.map((t) => t.name).join(', ')}]</span>
-          : null)}
+      <div className={`chat-bubble ${isUser ? 'chat-bubble-user' : 'chat-bubble-assistant'}`}>
+        {!content && msg.tool_calls && msg.tool_calls.length > 0 ? (
+          <span className="muted small">
+            [appel d'outil : {msg.tool_calls.map((t) => t.name).join(', ')}]
+          </span>
+        ) : isUser ? (
+          <span style={{ whiteSpace: 'pre-wrap' }}>{content}</span>
+        ) : (
+          <ReactMarkdown remarkPlugins={[remarkGfm]}>{content}</ReactMarkdown>
+        )}
       </div>
     </div>
   );

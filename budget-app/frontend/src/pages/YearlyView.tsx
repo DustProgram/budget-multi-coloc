@@ -1,13 +1,15 @@
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { ChevronLeft, ChevronRight } from 'lucide-react';
 import { api } from '../lib/api';
 import { eur, num } from '../lib/format';
-import type { DashboardData } from '../types';
+import type { Account, DashboardData } from '../types';
 import {
-  Button, Card, ErrorBox, Kpi, Loader, PageHeader,
+  Button, Card, ErrorBox, Kpi, Loader, PageHeader, Select,
 } from '../components/ui';
 import { YearChart } from '../components/charts/YearChart';
+
+type AccountFilter = 'all' | 'perso' | 'joint' | number;
 
 const MONTHS_SHORT = ['Jan','Fév','Mar','Avr','Mai','Juin','Juil','Aoû','Sep','Oct','Nov','Déc'];
 
@@ -22,21 +24,54 @@ const METRICS = [
 export function YearlyView() {
   const [year, setYear] = useState(new Date().getFullYear());
   const [metric, setMetric] = useState<(typeof METRICS)[number]['id']>('net');
+  const [filter, setFilter] = useState<AccountFilter>('all');
 
   const query = useQuery({
     queryKey: ['dashboard', 'yearly', year],
     queryFn: async () =>
       (await api.get<DashboardData[]>('/dashboard/yearly', { params: { year } })).data,
   });
+  const accountsQ = useQuery({
+    queryKey: ['accounts', 'all'],
+    queryFn: async () => (await api.get<Account[]>('/accounts/')).data,
+  });
 
-  const months = (query.data ?? []).map((d) => ({
-    m: MONTHS_SHORT[d.month - 1],
-    incomes: num(d.total_incomes),
-    charges: num(d.total_charges),
-    savings: num(d.total_savings),
-    purchases: num(d.total_purchases_imputed),
-    net: num(d.total_incomes) - num(d.total_charges) - num(d.total_savings) - num(d.total_purchases_imputed),
-  }));
+  // Comptes qui matchent le filtre courant (perso = solo, joint = type 'Compte joint')
+  const filteredAccountIds = useMemo(() => {
+    const all = accountsQ.data ?? [];
+    if (filter === 'all') return null;  // null = pas de filtre
+    if (filter === 'perso') return new Set(all.filter((a) => a.type !== 'Compte joint').map((a) => a.id));
+    if (filter === 'joint') return new Set(all.filter((a) => a.type === 'Compte joint').map((a) => a.id));
+    return new Set([filter as number]);
+  }, [filter, accountsQ.data]);
+
+  const months = (query.data ?? []).map((d) => {
+    if (!filteredAccountIds) {
+      return {
+        m: MONTHS_SHORT[d.month - 1],
+        incomes: num(d.total_incomes),
+        charges: num(d.total_charges),
+        savings: num(d.total_savings),
+        purchases: num(d.total_purchases_imputed),
+        net: num(d.total_incomes) - num(d.total_charges) - num(d.total_savings) - num(d.total_purchases_imputed),
+      };
+    }
+    // Filtre actif → on agrège seulement sur les comptes sélectionnés
+    const accs = d.accounts.filter((a) => filteredAccountIds.has(a.account_id));
+    const incomes = accs.reduce((s, a) => s + num(a.incomes), 0);
+    const charges = -accs.reduce((s, a) => s + num(a.charges), 0); // a.charges est négatif
+    const savings = -accs.reduce((s, a) => s + num(a.savings), 0);
+    const purchases = -accs.reduce((s, a) => s + num(a.purchases), 0);
+    const transfersNet = accs.reduce((s, a) => s + num(a.transfers_net), 0);
+    return {
+      m: MONTHS_SHORT[d.month - 1],
+      incomes,
+      charges,
+      savings,
+      purchases,
+      net: incomes - charges - savings - purchases + transfersNet,
+    };
+  });
 
   const totalIn = months.reduce((s, x) => s + x.incomes, 0);
   const totalCh = months.reduce((s, x) => s + x.charges, 0);
@@ -56,6 +91,22 @@ export function YearlyView() {
         title="Une année en un coup d'œil."
         subtitle={`${eur(totalNet)} en net sur 12 mois.`}
       >
+        <Select
+          value={typeof filter === 'number' ? String(filter) : filter}
+          onChange={(e) => {
+            const v = e.target.value;
+            setFilter(v === 'all' || v === 'perso' || v === 'joint' ? v : Number(v));
+          }}
+          style={{ minWidth: 180 }}
+        >
+          <option value="all">Tous les comptes</option>
+          <option value="perso">Comptes perso</option>
+          <option value="joint">Comptes joints</option>
+          <option disabled>──────────</option>
+          {(accountsQ.data ?? []).map((a) => (
+            <option key={a.id} value={a.id}>{a.name} — {a.bank}</option>
+          ))}
+        </Select>
         <Button onClick={() => setYear((y) => y - 1)}><ChevronLeft size={14} /></Button>
         <Button variant="primary">{year}</Button>
         <Button onClick={() => setYear((y) => y + 1)}><ChevronRight size={14} /></Button>
