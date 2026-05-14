@@ -75,6 +75,58 @@ async def get_yearly(
     return [_serialize(b) for b in compute_yearly_overview(db, user.id, y)]
 
 
+@router.get("/coloc_alerts")
+async def get_coloc_alerts(
+    request: Request,
+    db: Session = Depends(get_db),
+    year: Optional[int] = None,
+    month: Optional[int] = None,
+):
+    """Liste les retards d'abondement sur les comptes joints accessibles
+    à l'utilisateur ce mois. Sert au widget alerte du Dashboard.
+
+    Renvoie une liste : [{account_id, account_name, member_name, expected,
+    actual, balance}] avec balance < 0 uniquement.
+    """
+    from datetime import date as DateType
+    from models import Account
+    from services.access import accessible_account_ids
+    from services.joint_contributions import compute_joint_contributions
+
+    user: User = request.state.user
+    today = DateType.today()
+    y = year if year is not None else today.year
+    m = month if month is not None else today.month
+
+    # Comptes joints accessibles
+    acc_ids = accessible_account_ids(db, user.id)
+    if not acc_ids:
+        return {"alerts": []}
+    joint_accs = (
+        db.query(Account)
+        .filter(Account.id.in_(acc_ids), Account.type == "Compte joint")
+        .all()
+    )
+    alerts = []
+    for acc in joint_accs:
+        rows = compute_joint_contributions(db, acc.id, y, m)
+        for r in rows:
+            if r.balance < 0:
+                alerts.append({
+                    "account_id": acc.id,
+                    "account_name": acc.name,
+                    "user_id": r.user_id,
+                    "user_name": r.user_name,
+                    "expected": float(r.expected),
+                    "actual": float(r.actual),
+                    "balance": float(r.balance),
+                    "is_self": r.user_id == user.id,
+                })
+    # Tri : retards les plus gros en haut
+    alerts.sort(key=lambda a: a["balance"])
+    return {"year": y, "month": m, "alerts": alerts}
+
+
 @router.get("/balance_at")
 async def get_balance_at(
     request: Request,

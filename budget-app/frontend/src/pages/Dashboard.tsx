@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import {
   Wallet, TrendingUp, FileText, PiggyBank, ShoppingBag,
-  ChevronLeft, ChevronRight, ArrowRight, Calculator,
+  ChevronLeft, ChevronRight, ArrowRight, Calculator, Download,
 } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { api } from '../lib/api';
@@ -23,6 +23,23 @@ export function Dashboard() {
   const dash = useQuery({
     queryKey: ['dashboard', cursor.year, cursor.month],
     queryFn: async () => (await api.get<DashboardData>('/dashboard/', { params: cursor })).data,
+  });
+
+  // Widget retards d'abondement coloc (depuis 0.11.0)
+  interface ColocAlert {
+    account_id: number;
+    account_name: string;
+    user_id: number;
+    user_name: string;
+    expected: number;
+    actual: number;
+    balance: number;
+    is_self: boolean;
+  }
+  const alerts = useQuery({
+    queryKey: ['dashboard', 'coloc_alerts', cursor.year, cursor.month],
+    queryFn: async () =>
+      (await api.get<{ alerts: ColocAlert[] }>('/dashboard/coloc_alerts', { params: cursor })).data.alerts,
   });
 
   function shift(delta: number) {
@@ -67,10 +84,13 @@ export function Dashboard() {
         <Button variant="primary">{MONTHS[cursor.month - 1]} {cursor.year}</Button>
         <Button onClick={() => shift(1)}><ChevronRight size={14} /></Button>
         <Link to="/simulator"><Button variant="accent"><Calculator size={14} /> Puis-je acheter ?</Button></Link>
+        <ExportButtons year={cursor.year} month={cursor.month} />
       </PageHeader>
 
       {dash.isLoading && <Loader />}
       {dash.isError && <ErrorBox message="Erreur de chargement." />}
+
+      {alerts.data && alerts.data.length > 0 && <ColocAlertsBanner alerts={alerts.data} />}
 
       {data && data.accounts.length === 0 && (
         <EmptyState
@@ -165,5 +185,85 @@ export function Dashboard() {
         </>
       )}
     </>
+  );
+}
+
+interface ColocAlert {
+  account_id: number;
+  account_name: string;
+  user_id: number;
+  user_name: string;
+  expected: number;
+  actual: number;
+  balance: number;
+  is_self: boolean;
+}
+
+function ExportButtons({ year, month }: { year: number; month: number }) {
+  const [open, setOpen] = useState(false);
+  const trigger = async (fmt: 'csv' | 'pdf') => {
+    const url = `${api.defaults.baseURL}/export/${fmt}?year=${year}&month=${month}`;
+    window.open(url, '_blank');
+    setOpen(false);
+  };
+  return (
+    <div style={{ position: 'relative' }}>
+      <Button onClick={() => setOpen((o) => !o)}>
+        <Download size={14} /> Exporter
+      </Button>
+      {open && (
+        <div style={{
+          position: 'absolute', top: 'calc(100% + 4px)', right: 0,
+          background: 'var(--bg-elev)', border: '1px solid var(--line)',
+          borderRadius: 10, padding: 6, minWidth: 160, zIndex: 50,
+          boxShadow: 'var(--shadow)',
+        }}>
+          <button className="btn ghost" style={{ width: '100%', justifyContent: 'flex-start' }}
+            onClick={() => trigger('csv')}>📊 CSV (Excel)</button>
+          <button className="btn ghost" style={{ width: '100%', justifyContent: 'flex-start', marginTop: 4 }}
+            onClick={() => trigger('pdf')}>📄 PDF synthèse</button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function ColocAlertsBanner({ alerts }: { alerts: ColocAlert[] }) {
+  // Groupage par compte joint pour ne pas répéter le nom du compte
+  const byAccount = new Map<number, { name: string; rows: ColocAlert[] }>();
+  for (const a of alerts) {
+    const entry = byAccount.get(a.account_id) ?? { name: a.account_name, rows: [] };
+    entry.rows.push(a);
+    byAccount.set(a.account_id, entry);
+  }
+  const selfHasRetard = alerts.some((a) => a.is_self);
+  return (
+    <div style={{
+      border: '1px solid var(--rose)', background: 'var(--rose-bg)',
+      borderRadius: 'var(--radius)', padding: 14, marginBottom: 20,
+    }}>
+      <div className="row gap-2" style={{ marginBottom: 8 }}>
+        <strong style={{ color: 'var(--rose)' }}>⚠ Retards d'abondement coloc</strong>
+        {selfHasRetard && (
+          <span className="small" style={{ color: 'var(--rose)' }}>
+            (dont toi)
+          </span>
+        )}
+      </div>
+      {Array.from(byAccount.values()).map(({ name, rows }) => (
+        <div key={name} style={{ marginTop: 6 }}>
+          <div className="small muted">Compte joint <strong>{name}</strong> :</div>
+          <ul style={{ margin: '4px 0 0 18px', padding: 0, fontSize: 13 }}>
+            {rows.map((r) => (
+              <li key={r.user_id}>
+                <strong>{r.is_self ? 'Toi' : r.user_name}</strong> doit encore{' '}
+                <strong className="neg">{eur(Math.abs(r.balance))}</strong> ce mois
+                <span className="muted small"> (versé {eur(r.actual)} / attendu {eur(r.expected)})</span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      ))}
+    </div>
   );
 }
