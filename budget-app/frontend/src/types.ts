@@ -241,45 +241,9 @@ export interface SimulationResult {
   verdict_message: string;
 }
 
-export interface ColocChargeLine {
-  charge_id: number;
-  label: string;
-  total: string;
-  split_mode: string;
-  my_share: string | null;
-}
-
-export interface ColocSummaryEntry {
-  year: number;
-  month: number;
-  user_id: number;
-  user_name: string;
-  total_due: number;
-  total_paid: number;
-  balance: number;
-  by_charge: ColocChargeLine[];
-}
-
-export interface ColocDebt {
-  from_user_id: number;
-  from_user_name: string;
-  to_user_id: number;
-  to_user_name: string;
-  amount: number;
-}
-
-export interface ColocBreakdown {
-  charges_lines: Array<{
-    charge_id: number;
-    label: string;
-    total: number;
-    per_person: Record<string, number>;
-    split_mode: string;
-    payer_user_id: number;
-  }>;
-  summaries: ColocSummaryEntry[];
-  debts: ColocDebt[];
-}
+// (Types legacy ColocBreakdown / ColocDebt / ColocSummaryEntry retirés en 0.11.0
+// — l'app utilise désormais le modèle abondement via /accounts/{id}/contributions.
+// Si on revient sur l'export PDF coloc, recréer les types en local sur la page.)
 
 // ============================================================
 // Membres de compte joint

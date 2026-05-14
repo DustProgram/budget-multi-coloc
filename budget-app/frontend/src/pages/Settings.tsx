@@ -78,6 +78,7 @@ export function Settings() {
           <ExternalAccountCard me={me.data} onChanged={() => qc.invalidateQueries({ queryKey: ['me'] })} />
           <ProCard me={me.data} onChanged={() => qc.invalidateQueries({ queryKey: ['me'] })} />
           <NotifCard available={notifier.data?.ha_available ?? false} />
+          <CategoryBudgetsCard />
           {me.data.is_admin && <LLMSettingsCard />}
         </div>
       )}
@@ -660,6 +661,111 @@ function LLMSettingsCard() {
           {save.isPending ? 'Enregistrement…' : 'Enregistrer'}
         </Button>
       </div>
+    </Card>
+  );
+}
+
+// ============================================================
+// Plafonds budget par catégorie (0.11.0)
+// ============================================================
+
+interface BudgetUsage {
+  id: number;
+  category: string;
+  monthly_limit: string;
+  used: string;
+  remaining: string;
+  percent: number;
+  notes: string | null;
+}
+
+function CategoryBudgetsCard() {
+  const qc = useQueryClient();
+  const budgets = useQuery({
+    queryKey: ['category-budgets'],
+    queryFn: async () => (await api.get<BudgetUsage[]>('/category-budgets/')).data,
+  });
+  const [newCategory, setNewCategory] = useState('');
+  const [newLimit, setNewLimit] = useState('');
+
+  const create = useMutation({
+    mutationFn: async () =>
+      api.post('/category-budgets/', { category: newCategory, monthly_limit: newLimit }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['category-budgets'] });
+      setNewCategory('');
+      setNewLimit('');
+    },
+  });
+  const remove = useMutation({
+    mutationFn: async (id: number) => api.delete(`/category-budgets/${id}`),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['category-budgets'] }),
+  });
+
+  return (
+    <Card>
+      <p className="eyebrow">Plafonds budget</p>
+      <h2 style={{ fontFamily: 'var(--display)', fontSize: 26, margin: '4px 0 12px', letterSpacing: '-.01em' }}>
+        Par catégorie
+      </h2>
+      <p className="small muted" style={{ marginTop: 0 }}>
+        Définit un plafond mensuel par catégorie d'achat (ex : Restos 200€).
+        L'app affiche l'usage et alerte si tu dépasses.
+      </p>
+
+      {budgets.data && budgets.data.length > 0 && (
+        <div style={{ marginTop: 12 }}>
+          {budgets.data.map((b) => {
+            const tone =
+              b.percent >= 100 ? 'var(--rose)' :
+              b.percent >= 80 ? 'var(--amber)' : 'var(--sage)';
+            return (
+              <div key={b.id} style={{
+                padding: '10px 0', borderBottom: '1px solid var(--line)',
+              }}>
+                <div className="row between">
+                  <strong>{b.category}</strong>
+                  <span className="row gap-2">
+                    <span style={{ color: tone, fontWeight: 600 }}>
+                      {Number(b.used).toFixed(2)}€ / {Number(b.monthly_limit).toFixed(2)}€
+                    </span>
+                    <button className="btn sm"
+                      onClick={() => { if (confirm(`Supprimer le plafond '${b.category}' ?`)) remove.mutate(b.id); }}
+                    >
+                      <Trash2 size={12} />
+                    </button>
+                  </span>
+                </div>
+                <div style={{
+                  height: 6, background: 'var(--bg-sunken)', borderRadius: 999,
+                  marginTop: 6, overflow: 'hidden',
+                }}>
+                  <div style={{
+                    width: `${Math.min(100, b.percent)}%`,
+                    height: '100%', background: tone, transition: 'width 0.3s',
+                  }} />
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      <div className="row gap-2" style={{ marginTop: 12 }}>
+        <Input value={newCategory} onChange={(e) => setNewCategory(e.target.value)}
+          placeholder="Catégorie (ex: Restos)" style={{ flex: 2 }} />
+        <Input type="number" step="0.01" value={newLimit}
+          onChange={(e) => setNewLimit(e.target.value)}
+          placeholder="Plafond €" style={{ flex: 1 }} />
+        <Button variant="primary"
+          onClick={() => create.mutate()}
+          disabled={!newCategory.trim() || !newLimit || create.isPending}>
+          <Plus size={12} />
+        </Button>
+      </div>
+      {create.isError && (
+        <ErrorBox message={create.error instanceof Error ? create.error.message : 'Erreur'} />
+      )}
     </Card>
   );
 }

@@ -616,6 +616,26 @@ class ImportBatch(Base):
     undone_at = Column(DateTime, nullable=True)
 
 
+class CategoryBudget(Base):
+    """Plafond mensuel sur une catégorie d'achat (ex: 'Restos' = 200€/mois).
+
+    Quand l'utilisateur dépasse le plafond, l'app affiche une alerte. Permet
+    de garder un œil sur les postes de dépenses spécifiques.
+    """
+    __tablename__ = "category_budgets"
+
+    id = Column(Integer, primary_key=True)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    category = Column(String(64), nullable=False)
+    monthly_limit = Column(Numeric(10, 2), nullable=False)
+    notes = Column(Text, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+
+    __table_args__ = (
+        Index("ix_category_budgets_user_cat", "user_id", "category", unique=True),
+    )
+
+
 class ImportedEntity(Base):
     """Lien batch → entité concrète créée (Purchase, Charge, OneTimeTransfer…)."""
     __tablename__ = "imported_entities"

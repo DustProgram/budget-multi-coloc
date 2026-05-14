@@ -25,6 +25,8 @@ from api import (
     import_ as import_api,
     bulk_import as bulk_import_api,
     settings_llm as settings_llm_api,
+    export as export_api,
+    category_budgets as category_budgets_api,
 )
 from models.base import init_db
 from services.backup import perform_monthly_backup
@@ -114,6 +116,8 @@ app.include_router(chat_api.router, prefix="/api/chat", tags=["chat"])
 app.include_router(import_api.router, prefix="/api/import", tags=["import"])
 app.include_router(bulk_import_api.router, prefix="/api/bulk-import", tags=["bulk-import"])
 app.include_router(settings_llm_api.router, prefix="/api/settings", tags=["settings"])
+app.include_router(export_api.router, prefix="/api/export", tags=["export"])
+app.include_router(category_budgets_api.router, prefix="/api/category-budgets", tags=["category-budgets"])
 
 # ===== Frontend statique (PWA) =====
 static_dir = Path(os.environ.get("STATIC_DIR", "/app/static"))

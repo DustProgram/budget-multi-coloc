@@ -87,13 +87,6 @@ def init_db():
         # qu'un revenu/charge saisi aujourd'hui pollue les mois passés.
         _migrate_add_column_if_missing(tbl, "created_at", "DATETIME")
 
-    # ⚠️ Backfill one-shot 0.9.6 — pose created_at = now() pour toutes les
-    # lignes qui ont créé_at = NULL (i.e. lignes saisies avant la migration
-    # 0.9.5). Sans ça, les revenus/charges existants continuent d'apparaître
-    # rétroactivement sur les mois passés.
-    # À RETIRER en 0.9.7 (idempotent mais inutile une fois fait).
-    _backfill_created_at_if_null()
-
     # Override LLM dans Settings (0.9.4) — surcharge la config.yaml depuis l'UI
     _migrate_add_column_if_missing("settings", "llm_provider", "VARCHAR(40)")
     _migrate_add_column_if_missing("settings", "llm_api_key", "TEXT")
@@ -154,29 +147,6 @@ def _create_index_if_missing(name: str, table: str, column: str, unique: bool = 
     u = "UNIQUE " if unique else ""
     with engine.connect() as conn:
         conn.execute(text(f"CREATE {u}INDEX IF NOT EXISTS {name} ON {table}({column})"))
-        conn.commit()
-
-
-def _backfill_created_at_if_null() -> None:
-    """One-shot 0.9.6 — pose created_at = NOW() pour les lignes existantes
-    avec created_at = NULL. Conséquence : les revenus/charges saisis avant
-    cette migration ne polluent plus les mois antérieurs à aujourd'hui.
-
-    À RETIRER en 0.9.7 — idempotent mais coût SQL inutile une fois fait.
-    """
-    from sqlalchemy import text
-    from datetime import datetime
-    now = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
-    with engine.connect() as conn:
-        for tbl in ("incomes", "charges", "recurring_transfers", "auto_savings"):
-            try:
-                conn.execute(
-                    text(f"UPDATE {tbl} SET created_at = :now WHERE created_at IS NULL"),
-                    {"now": now},
-                )
-            except Exception:
-                # Table peut ne pas exister (nouvelle install) — ignore
-                pass
         conn.commit()
 
 
