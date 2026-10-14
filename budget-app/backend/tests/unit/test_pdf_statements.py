@@ -88,7 +88,7 @@ def _sumeria_like() -> bytes:
         ("07/09", "Prélèvement automatique :", "37.77", None, "497.05", ["Réf. externe : HABITATION 018705193",
                                                                       "Réf. interne :",
                                                                       "099223b1-94a6-456d-a646-2e722f60f8f0"]),
-        ("07/09", "Virement SEPA émis vers l’iban", "412.00", None, "85.05", ['FR761751 pour "Loyer"']),
+        ("07/09", "Virement SEPA émis vers l’iban", "412.00", None, "85.05", ['FR7600000 pour "Loyer"']),
     ]
     y = 700
     for d, label, debit, credit, solde, details in rows:
