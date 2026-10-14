@@ -388,6 +388,7 @@ def resolve(
     category: Optional[str] = None,
     label: Optional[str] = None,
     create_rule: bool = False,
+    amount: Optional[Decimal] = None,
     rule_pattern: Optional[str] = None,
 ) -> BankTransaction:
     if kind not in KINDS:
@@ -412,7 +413,7 @@ def resolve(
         if amt >= 0:
             raise ValueError("Une charge est forcément un débit.")
         ch = Charge(
-            user_id=user.id, label=nice_label, total_amount=abs(amt),
+            user_id=user.id, label=nice_label, total_amount=abs(amount or amt),
             frequency=Frequency.MENSUELLE, day_of_month=tx.date.day,
             split_mode=SplitMode.EGAL if is_joint_account(db, tx.account_id) else SplitMode.PERSO,
             account_id=tx.account_id, valid_from=_first_of_month(tx.date),
@@ -426,7 +427,7 @@ def resolve(
         if amt <= 0:
             raise ValueError("Un revenu est forcément un crédit.")
         inc = Income(
-            user_id=user.id, source=nice_label, amount=amt, day_of_month=tx.date.day,
+            user_id=user.id, source=nice_label, amount=abs(amount or amt), day_of_month=tx.date.day,
             type=IncomeType.REGULIER, account_id=tx.account_id, valid_from=_first_of_month(tx.date),
         )
         db.add(inc)

@@ -9,9 +9,9 @@ from sqlalchemy.orm import Session
 
 from models import Account, BankTransaction, MatchingRule, User
 from models.base import get_db
-from services import reconciliation as rec
+from services import onboarding, reconciliation as rec
 from services.access import accessible_account_ids, user_can_write_account
-from services.bank_import import parse_statement
+from services.bank_import import parse_statement_with_meta
 from services.statement_parsers import StatementParseError
 
 router = APIRouter()
@@ -22,6 +22,10 @@ class ImportOut(BaseModel):
     duplicates: int
     matched: int
     to_review: int
+    opening_balance: Optional[Decimal] = None
+    closing_balance: Optional[Decimal] = None
+    balance_verified: bool = False
+    warnings: list[str] = []
 
 
 class OptionOut(BaseModel):
@@ -109,10 +113,13 @@ def import_file(db: Session, user: User, account_id: int, filename: str, data: b
     if not user_can_write_account(db, user.id, account_id):
         raise HTTPException(403, "Pas le droit d'écrire sur ce compte.")
     try:
-        rows, source = parse_statement(db, user.id, filename, data)
+        rows, source, meta = parse_statement_with_meta(db, user.id, filename, data)
     except StatementParseError as e:
         raise HTTPException(422, str(e))
-    return rec.import_transactions(db, user, account_id, rows, source)
+    out = rec.import_transactions(db, user, account_id, rows, source)
+    out.update(opening_balance=meta.opening, closing_balance=meta.closing,
+               balance_verified=meta.verified, warnings=meta.warnings)
+    return out
 
 
 @router.post("/import", response_model=ImportOut)
@@ -198,3 +205,66 @@ async def delete_rule(rule_id: int, request: Request, db: Session = Depends(get_
         raise HTTPException(404, "Règle introuvable.")
     db.delete(rule)
     db.commit()
+
+
+# ============================================================
+# Démarrage rapide : tri groupé des opérations à valider
+# ============================================================
+
+class GroupOut(BaseModel):
+    id: str
+    kind: str
+    label: str
+    pattern: str
+    tx_ids: list[int]
+    amount: Decimal
+    day: int
+    months: int
+    count: int
+    total: Decimal
+    category: Optional[str]
+    reason: str
+    examples: list[str]
+
+
+class GroupIn(BaseModel):
+    tx_ids: list[int]
+    kind: str
+    label: str = ""
+    category: Optional[str] = None
+    amount: Optional[Decimal] = None
+    create_rule: bool = True
+    pattern: Optional[str] = None
+
+
+class ApplyIn(BaseModel):
+    groups: list[GroupIn]
+
+
+@router.get("/onboarding", response_model=list[GroupOut])
+async def onboarding_suggestions(
+    request: Request, db: Session = Depends(get_db), account_id: Optional[int] = None,
+):
+    groups = onboarding.suggest_groups(db, request.state.user, account_id)
+    return [
+        GroupOut(id=g.id, kind=g.kind, label=g.label, pattern=g.pattern, tx_ids=g.tx_ids,
+                 amount=g.amount, day=g.day, months=g.months, count=len(g.tx_ids), total=g.total,
+                 category=g.category, reason=g.reason, examples=g.examples)
+        for g in groups
+    ]
+
+
+@router.post("/onboarding/apply")
+async def onboarding_apply(payload: ApplyIn, request: Request, db: Session = Depends(get_db)):
+    user = request.state.user
+    applied, errors = 0, []
+    for g in payload.groups:
+        try:
+            applied += onboarding.apply_group(
+                db, user, g.tx_ids, g.kind, g.label.strip(), g.category, g.amount,
+                g.create_rule and bool(g.pattern), g.pattern,
+            )
+        except ValueError as e:
+            db.rollback()
+            errors.append(f"{g.label or g.kind} : {e}")
+    return {"applied": applied, "errors": errors}

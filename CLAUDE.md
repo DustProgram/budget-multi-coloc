@@ -10,7 +10,7 @@ en mode `AUTH_MODE=standalone` (cf `deploy/README.md`). L'add-on Home Assistant 
 
 Passage en **standalone sur VPS** : `deploy/` (docker-compose app + Caddy HTTPS), `budget-app/Dockerfile.standalone`,
 image `ghcr.io/dustprogram/budget-multi-coloc-standalone` (workflow `build-standalone.yml`).
-Image HA toujours publiée sur `ghcr.io/dustprogram/budget-multi-coloc-{arch}`. Tests : **86/86 pytest verts**. `pip-audit` en CI.
+Image HA toujours publiée sur `ghcr.io/dustprogram/budget-multi-coloc-{arch}`. Tests : **89/89 pytest verts**. `pip-audit` en CI.
 Rapprochement relevés ↔ déclarations + page « À valider » + API agent Hermes/n8n livrés dans la même version → `docs/AUTOMATISATIONS.md`.
 Reste : synchro bancaire directe (agrégateur DSP2).
 
@@ -161,6 +161,12 @@ Reste : synchro bancaire directe (agrégateur DSP2).
 - `/api/agent/*` : auth `AGENT_API_TOKEN` (hors middleware session), identité par `channel`+`handle` liés via code (in-memory 15 min) ou `username` (n8n)
 - Le SW cache `/api` GET en **NetworkFirst** (était StaleWhileRevalidate → listes pas à jour après mutation)
 
+### Relevés PDF & démarrage rapide (0.12.0)
+- `services/pdf_statements.py` : lecture **locale** des PDF à colonnes Débit/Crédit (BRED, BoursoBank) via pdfminer (position X des montants vs en-têtes), arrêt à « Nouveau solde » / « poste annexe », **vérifiée** par ancien solde + mouvements = nouveau solde. IA seulement si non vérifié (`source = "pdf-ia"`)
+- `services/onboarding.py` : groupes par commerçant (libellé sans CARTE/PRLV/VIR…) → revenus réguliers (≥2 mois), charges (prélèvements/virements programmés ≥2 mois ; carte seulement si abonnement connu ou ≥10 €, 1×/mois), virements vers soi (nom complet dans le libellé) → ignorer, reste → achats catégorisés (mots-clés puis 1 appel IA optionnel)
+- `GET /api/bank/onboarding`, `POST /api/bank/onboarding/apply` ; UI « Démarrage rapide » dans `Inbox.tsx` (≥5 opérations à trier)
+- ⚠️ Ne jamais committer de vrais relevés : tests sur PDF générés (reportlab) au même format
+
 ### Second facteur & sessions (0.12.0)
 - Passkeys WebAuthn (`webauthn` py + `@simplewebauthn/browser`) **en plus** du mot de passe : `/api/auth/login/password` renvoie `mfa_required` + options, puis `/login/passkey` ou `/login/recovery`. État intermédiaire : cookie `budget_mfa` signé (path `/api/auth/login`, 5 min) + challenge en mémoire à usage unique (`services/passkeys.py`)
 - RP ID = `WEBAUTHN_RP_ID` ou `DOMAIN` (jamais le Host reçu) ; en dev = host de la requête
@@ -255,7 +261,7 @@ DEV_MODE=true LLM_API_KEY=... DATABASE_URL="sqlite:///./dev.db?check_same_thread
 # Dev frontend
 cd budget-app/frontend && npm run dev
 
-# Tests backend (86 actuellement)
+# Tests backend (89 actuellement)
 cd budget-app/backend && DEV_MODE=true DATABASE_URL="sqlite:///./test.db" .venv/bin/pytest tests/ -q
 
 # Build frontend

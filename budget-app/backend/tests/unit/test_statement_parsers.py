@@ -87,7 +87,7 @@ def test_pdf_statement_goes_through_llm(monkeypatch):
     monkeypatch.setattr(bank_import, "record_usage", lambda *a, **k: None)
 
     rows, source = bank_import.parse_statement(None, 1, "releve.pdf", buf.getvalue())
-    assert source == "pdf"
+    assert source == "pdf-ia"  # pas de colonnes Débit/Crédit → secours IA
     assert "Virement de Camille" in seen["text"]
     assert rows[0].amount == Decimal("450.00") and rows[0].date == date(2026, 3, 2)
 

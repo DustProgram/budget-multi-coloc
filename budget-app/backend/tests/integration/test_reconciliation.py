@@ -79,7 +79,9 @@ STATEMENT = _csv(
 def test_import_matches_declarations(client, perso):
     r = _import(client, perso, STATEMENT)
     assert r.status_code == 200, r.text
-    assert r.json() == {"imported": 4, "duplicates": 0, "matched": 3, "to_review": 1}
+    body = r.json()
+    assert {k: body[k] for k in ("imported", "duplicates", "matched", "to_review")} == \
+        {"imported": 4, "duplicates": 0, "matched": 3, "to_review": 1}
     t = _txs(perso)
     assert t["PRLV SEPA SCI DU PARC"].match_kind == "charge"
     assert t["VIR ACME SALAIRE MARS"].match_kind == "income"
