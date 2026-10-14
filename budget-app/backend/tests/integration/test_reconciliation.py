@@ -9,7 +9,7 @@ from main import app
 from models.base import Base, SessionLocal, engine
 from models import (
     Account, AccountMember, AccountMemberRole, AccountType, BankTransaction,
-    Charge, ChannelLink, Frequency, Income, Purchase, SplitMode, User,
+    Charge, ChannelLink, Envelope, Frequency, Income, Purchase, SplitMode, User,
 )
 from services.channel_links import reset as reset_codes
 from services.charge_splits import regenerate_splits
@@ -33,6 +33,8 @@ def me(client):
 def perso(me):
     db = SessionLocal()
     try:
+        # Sans enveloppe : les petites dépenses restent « à valider » dans ces tests
+        db.query(Envelope).delete()
         acc = Account(user_id=me, bank="BRED", type=AccountType.COURANT, name="BRED perso",
                       initial_balance=Decimal("0"))
         db.add(acc)

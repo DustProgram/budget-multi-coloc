@@ -10,7 +10,7 @@ en mode `AUTH_MODE=standalone` (cf `deploy/README.md`). L'add-on Home Assistant 
 
 Passage en **standalone sur VPS** : `deploy/` (docker-compose app + Caddy HTTPS), `budget-app/Dockerfile.standalone`,
 image `ghcr.io/dustprogram/budget-multi-coloc-standalone` (workflow `build-standalone.yml`).
-Image HA toujours publiée sur `ghcr.io/dustprogram/budget-multi-coloc-{arch}`. Tests : **91/91 pytest verts**. `pip-audit` en CI.
+Image HA toujours publiée sur `ghcr.io/dustprogram/budget-multi-coloc-{arch}`. Tests : **95/95 pytest verts**. `pip-audit` en CI.
 Rapprochement relevés ↔ déclarations + page « À valider » + API agent Hermes/n8n livrés dans la même version → `docs/AUTOMATISATIONS.md`.
 Reste : synchro bancaire directe (agrégateur DSP2).
 
@@ -167,6 +167,14 @@ Reste : synchro bancaire directe (agrégateur DSP2).
 - `GET /api/bank/onboarding`, `POST /api/bank/onboarding/apply` ; UI « Démarrage rapide » dans `Inbox.tsx` (≥5 opérations à trier)
 - ⚠️ Ne jamais committer de vrais relevés : tests sur PDF générés (reportlab) au même format
 
+### Enveloppes vie quotidienne (0.12.0) — philosophie de l'app
+- **On ne détaille pas les petites dépenses** : l'objectif est « combien il reste à la fin » et « puis-je me permettre cet achat ».
+- `Envelope` : perso (`user_id`, `account_id` nul) ou commune (`account_id` = compte joint, partagée à parts égales, ajoutée à l'abondement attendu de chaque membre). `monthly_amount` + `big_purchase_threshold` (seuil choisi par l'user, défaut 150 €)
+- Import : débit sans déclaration correspondante et < seuil → `match_kind = "daily"` sans question ; ≥ seuil → « à valider » (achat exceptionnel ou quotidien ?). Sans enveloppe configurée, rien n'est auto-classé quotidien
+- `MonthlyBudget.available_for_purchases` = **marge projets** = revenus − charges − épargne − achats − enveloppe perso − part de l'enveloppe commune (`envelope_perso`, `envelope_common_share`)
+- `GET /api/envelopes/` (statut du mois : dépensé, reste, €/jour, suggestion = moyenne des petites dépenses importées), `PUT /api/envelopes/perso`, `PUT /api/envelopes/account/{id}` ; UI `components/EnvelopesCard.tsx` sur le Dashboard
+- Démarrage rapide : toutes les petites dépenses d'un compte = **un seul groupe « daily »**
+
 ### Second facteur & sessions (0.12.0)
 - Passkeys WebAuthn (`webauthn` py + `@simplewebauthn/browser`) **en plus** du mot de passe : `/api/auth/login/password` renvoie `mfa_required` + options, puis `/login/passkey` ou `/login/recovery`. État intermédiaire : cookie `budget_mfa` signé (path `/api/auth/login`, 5 min) + challenge en mémoire à usage unique (`services/passkeys.py`)
 - RP ID = `WEBAUTHN_RP_ID` ou `DOMAIN` (jamais le Host reçu) ; en dev = host de la requête
@@ -261,7 +269,7 @@ DEV_MODE=true LLM_API_KEY=... DATABASE_URL="sqlite:///./dev.db?check_same_thread
 # Dev frontend
 cd budget-app/frontend && npm run dev
 
-# Tests backend (91 actuellement)
+# Tests backend (95 actuellement)
 cd budget-app/backend && DEV_MODE=true DATABASE_URL="sqlite:///./test.db" .venv/bin/pytest tests/ -q
 
 # Build frontend

@@ -22,7 +22,7 @@ from typing import NamedTuple
 from sqlalchemy.orm import Session
 
 from models import (
-    BankTransaction, Charge, ChargeSplit, OneTimeTransfer, RecurringTransfer, User,
+    BankTransaction, Charge, ChargeSplit, Envelope, OneTimeTransfer, RecurringTransfer, User,
 )
 from services.access import account_member_user_ids
 from services.budget_calc import charge_is_active_in_month
@@ -70,6 +70,13 @@ def compute_joint_contributions(
         for s in splits:
             if s.user_id in expected_by_user:
                 expected_by_user[s.user_id] += Decimal(s.amount or 0)
+
+    # L'enveloppe commune (courses, repas…) s'abonde comme une charge partagée
+    env = db.query(Envelope).filter(Envelope.account_id == account_id).first()
+    if env and env.monthly_amount:
+        share = Decimal(env.monthly_amount) / len(members)
+        for uid in expected_by_user:
+            expected_by_user[uid] += share
 
     # === Actual : virements entrants vers ce compte ce mois ===
     actual_by_user: dict[int, Decimal] = {uid: Decimal(0) for uid in members}

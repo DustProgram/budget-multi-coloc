@@ -13,6 +13,7 @@ import {
 } from '../components/ui';
 import { Donut } from '../components/charts/Donut';
 import { Sparkline } from '../components/charts/Sparkline';
+import { EnvelopesCard } from '../components/EnvelopesCard';
 
 const MONTHS = ['Janvier','Février','Mars','Avril','Mai','Juin','Juillet','Août','Septembre','Octobre','Novembre','Décembre'];
 
@@ -67,7 +68,7 @@ export function Dashboard() {
     sousTitre = <>Flux du mois : <strong className="neg">{eur(dispo)}</strong>. Solde projeté fin de mois : <strong>{eur(totalWealth)}</strong> (tu vas le diminuer ce mois).</>;
   } else if (dispo >= 0) {
     titre = 'Tout va bien ce mois-ci.';
-    sousTitre = <>Marge dispo pour achats spontanés : <strong className="pos">{eur(dispo)}</strong>. Solde projeté fin de mois : <strong>{eur(totalWealth)}</strong>.</>;
+    sousTitre = <>Marge pour tes projets (après le quotidien) : <strong className="pos">{eur(dispo)}</strong>. Solde projeté fin de mois : <strong>{eur(totalWealth)}</strong>.</>;
   } else {
     titre = 'Attention, marge négative.';
     sousTitre = <>Flux du mois : {eur(dispo)} · Solde projeté : {eur(totalWealth)}</>;
@@ -114,8 +115,14 @@ export function Dashboard() {
             <Kpi label="Charges" icon={<FileText size={13} />} value={eur(data.total_charges)} />
             <Kpi label="Épargne" icon={<PiggyBank size={13} />} value={eur(data.total_savings)}
               subClass="pos" sub="↗ programmée" />
-            <Kpi label="Achats" icon={<ShoppingBag size={13} />} value={eur(data.total_purchases_imputed)} />
+            <Kpi label="Quotidien" icon={<ShoppingBag size={13} />}
+              value={eur(num(data.envelope_perso) + num(data.envelope_common_share))}
+              sub={num(data.total_purchases_imputed) > 0 ? `+ ${eur(data.total_purchases_imputed)} d'achats` : 'enveloppes'} />
+            <Kpi label="Marge projets" icon={<Calculator size={13} />} value={eur(dispo)}
+              subClass={dispo >= 0 ? 'pos' : 'neg'} sub="ce qui reste à la fin" />
           </div>
+
+          <EnvelopesCard year={cursor.year} month={cursor.month} />
 
           <div className="grid" style={{ gridTemplateColumns: '1fr 2fr', gap: 16, marginBottom: 24 }}>
             <Card>
@@ -123,6 +130,7 @@ export function Dashboard() {
               <Donut data={[
                 { label: 'Charges', value: num(data.total_charges), color: 'var(--rose)' },
                 { label: 'Épargne', value: num(data.total_savings), color: 'var(--plum)' },
+                { label: 'Quotidien', value: num(data.envelope_perso) + num(data.envelope_common_share), color: 'var(--sage)' },
                 { label: 'Achats', value: num(data.total_purchases_imputed), color: 'var(--amber)' },
               ]} />
             </Card>

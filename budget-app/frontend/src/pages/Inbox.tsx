@@ -38,7 +38,7 @@ interface FileResult extends ImportResult { name: string; error?: string }
 
 interface Suggestion {
   id: string;
-  kind: 'new_charge' | 'new_income' | 'new_purchase' | 'ignore' | 'contribution';
+  kind: 'new_charge' | 'new_income' | 'new_purchase' | 'ignore' | 'contribution' | 'daily';
   label: string;
   pattern: string;
   contributor_user_id: number | null;
@@ -68,7 +68,7 @@ interface Rule {
 const KIND_LABEL: Record<string, string> = {
   charge: 'Charge', income: 'Revenu', recurring_transfer: 'Virement', onetime_transfer: 'Virement ponctuel',
   saving: 'Épargne', purchase: 'Achat', contribution: 'Abondement', ignore: 'Ignorée',
-  new_purchase: 'Achat (catégorie)',
+  new_purchase: 'Achat (catégorie)', daily: 'Quotidien',
 };
 
 const CATEGORIES = [
@@ -209,7 +209,8 @@ function ImportCard({ onDone }: { onDone: () => void }) {
 const KIND_CHOICES: { value: Suggestion['kind']; label: string }[] = [
   { value: 'new_income', label: 'Revenu mensuel' },
   { value: 'new_charge', label: 'Charge mensuelle' },
-  { value: 'new_purchase', label: 'Achats' },
+  { value: 'daily', label: 'Quotidien (enveloppe)' },
+  { value: 'new_purchase', label: 'Achat exceptionnel' },
   { value: 'ignore', label: 'Ignorer' },
 ];
 
@@ -218,7 +219,8 @@ const SECTIONS: { kind: Suggestion['kind']; title: string; hint: string }[] = [
   { kind: 'new_income', title: 'Revenus qui reviennent chaque mois', hint: 'Déclarés comme revenus mensuels.' },
   { kind: 'new_charge', title: 'Charges qui reviennent chaque mois', hint: 'Déclarées comme charges mensuelles (abonnements, prélèvements…).' },
   { kind: 'ignore', title: 'À ignorer', hint: 'Virements entre tes comptes, remboursements, entrées ponctuelles.' },
-  { kind: 'new_purchase', title: 'Achats, regroupés par commerçant', hint: 'Enregistrés comme achats dans la catégorie choisie.' },
+  { kind: 'daily', title: 'Dépenses du quotidien', hint: "Comptées dans ton enveloppe, sans catégorie ni détail. Règle son montant sur le tableau de bord." },
+  { kind: 'new_purchase', title: 'Gros achats', hint: 'Au-dessus de ton seuil : achat exceptionnel (retiré de ta marge) ou quotidien ?' },
 ];
 
 interface Draft { selected: boolean; kind: Suggestion['kind']; label: string; category: string }
@@ -326,7 +328,7 @@ function OnboardingPanel({ count, onDone }: { count: number; onDone: () => void 
                         onChange={(e) => set(g.id, { category: e.target.value })} />
                     )}
                     <span className="small muted" style={{ flex: '1 1 180px', textAlign: 'right' }}>
-                      {g.count}× · {g.kind === 'new_purchase' ? `total ${eur(g.total)}` : `${eur(g.amount)} vers le ${g.day}`}
+                      {g.count}× · {g.kind === 'daily' ? `≈ ${eur(g.amount)}/mois` : g.kind === 'new_purchase' ? `total ${eur(g.total)}` : `${eur(g.amount)} vers le ${g.day}`}
                       <br />{g.reason}
                     </span>
                   </div>

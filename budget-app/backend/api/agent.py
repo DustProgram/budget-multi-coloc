@@ -275,6 +275,7 @@ class SummaryIn(Who):
 @router.post("/summary", dependencies=[Depends(require_agent)])
 async def agent_summary(payload: SummaryIn, db: Session = Depends(get_db)):
     from services.budget_calc import compute_monthly_budget
+    from services.envelopes import statuses as envelope_statuses
     user = resolve_actor(db, payload)
     today = date.today()
     y, m = payload.year or today.year, payload.month or today.month
@@ -290,6 +291,11 @@ async def agent_summary(payload: SummaryIn, db: Session = Depends(get_db)):
         "total_savings": str(b.total_savings),
         "total_purchases": str(b.total_purchases_imputed),
         "available_for_purchases": str(b.available_for_purchases),
+        "envelopes": [
+            {"label": e["label"], "budget": str(e["monthly_amount"]), "spent": str(e["spent"]),
+             "remaining": str(e["remaining"]), "per_day": str(e["per_day"])}
+            for e in envelope_statuses(db, user, y, m) if e["configured"]
+        ],
         "final_balance": str(b.total_final_balance),
         "to_review": to_review,
     }

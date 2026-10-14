@@ -47,6 +47,9 @@ class MonthlyBudget:
     total_final_balance: Decimal = Decimal(0)
 
     available_for_purchases: Decimal = Decimal(0)
+    # Enveloppes vie quotidienne déjà retirées de available_for_purchases
+    envelope_perso: Decimal = Decimal(0)
+    envelope_common_share: Decimal = Decimal(0)
     accounts: list[MonthlyAccountSummary] = field(default_factory=list)
 
 
@@ -234,14 +237,34 @@ def _compute_monthly_budget_uncached(db: Session, user_id: int, year: int, month
                     and tr.dest_account_id in joint_account_ids):
                 perso_to_joint += tr.amount or Decimal(0)
 
-    # ===== Solde disponible pour achats =====
-    # Revenus - Charges - Épargne - Achats - Virements perso→joint (si toggle)
+    # ===== Enveloppes vie quotidienne =====
+    # Les petites dépenses ne sont pas détaillées : on réserve un montant fixe.
+    # Commune = part égale de l'enveloppe de chaque compte joint (sauf si on
+    # compte déjà les virements réels vers le joint, toggle exclude_joint).
+    from models import Envelope
+    from services.access import account_member_user_ids, accessible_account_ids
+    perso_env = db.query(Envelope).filter(
+        Envelope.user_id == user_id, Envelope.account_id.is_(None),
+    ).first()
+    budget.envelope_perso = Decimal(perso_env.monthly_amount or 0) if perso_env else Decimal(0)
+    if not exclude_joint:
+        for env in db.query(Envelope).filter(
+            Envelope.account_id.in_(accessible_account_ids(db, user_id)),
+        ).all():
+            members = account_member_user_ids(db, env.account_id)
+            if user_id in members:
+                budget.envelope_common_share += Decimal(env.monthly_amount or 0) / len(members)
+
+    # ===== Marge pour projets / gros achats =====
+    # Revenus - Charges - Épargne - Achats - Virements perso→joint (si toggle) - Enveloppes
     budget.available_for_purchases = (
         budget.total_incomes
         - budget.total_charges
         - budget.total_savings
         - budget.total_purchases_imputed
         - perso_to_joint
+        - budget.envelope_perso
+        - budget.envelope_common_share
     )
 
     # ===== 5. Calcul par compte =====

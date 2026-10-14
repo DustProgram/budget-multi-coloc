@@ -227,6 +227,8 @@ export interface DashboardData {
   total_initial_balance: string;
   total_final_balance: string;
   available_for_purchases: string;
+  envelope_perso?: string;
+  envelope_common_share?: string;
   accounts: DashboardAccount[];
 }
 

@@ -76,7 +76,12 @@ Réponds ensuite avec le bilan (`imported`, `matched`, `to_review`) et propose d
 ## « Combien il me reste ce mois ? »
 
 `POST /api/agent/summary` avec `{"channel","handle"}` (option `year`, `month`).
-Réponds simplement : revenus, charges, épargne, achats, reste disponible, et le nombre d'opérations à valider.
+Réponds simplement. Ce qui compte pour l'utilisateur :
+- **la marge projets** (`available_for_purchases`) : ce qui reste après charges, épargne et enveloppes ;
+- **ses enveloppes vie quotidienne** (`envelopes`) : reste du mois et montant par jour
+  (ex. « Il te reste 210 € pour le quotidien, soit 15 €/jour jusqu'à la fin du mois ») ;
+- le nombre d'opérations à valider.
+Les petites dépenses ne se détaillent pas : ne propose jamais de les catégoriser une par une.
 
 ## Règles
 

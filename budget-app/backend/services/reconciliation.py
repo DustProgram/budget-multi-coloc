@@ -37,8 +37,10 @@ IGNORED = "ignored"
 
 KINDS = {
     "charge", "income", "recurring_transfer", "onetime_transfer", "saving",
-    "purchase", "contribution", "new_purchase", "new_charge", "new_income", "ignore",
+    "purchase", "contribution", "new_purchase", "new_charge", "new_income", "ignore", "daily",
 }
+# Règles sans fourchette de montant : seul le libellé compte
+_NO_AMOUNT_RULES = ("ignore", "new_purchase", "contribution", "daily")
 
 _MONTHS = {
     "JANVIER", "FEVRIER", "MARS", "AVRIL", "MAI", "JUIN", "JUILLET", "AOUT",
@@ -276,6 +278,12 @@ def auto_match(db: Session, tx: BankTransaction) -> None:
     if len(cands) == 1:
         c = cands[0]
         _set_match(tx, c.kind, c.target_id, c.contributor_user_id)
+    elif not cands and tx.amount < 0:
+        # Petite dépense sans déclaration correspondante → enveloppe, sans question
+        from services.envelopes import envelope_for_account
+        env = envelope_for_account(db, tx.account_id)
+        if env and -Decimal(tx.amount) < Decimal(env.big_purchase_threshold):
+            _set_match(tx, "daily", None, None)
 
 
 def _set_match(tx: BankTransaction, kind: str, target_id: Optional[int], contributor: Optional[int]) -> None:
@@ -332,7 +340,8 @@ def options_for(db: Session, tx: BankTransaction) -> list[dict]:
     opts = [{"key": c.key, "label": c.label} for c in compute_candidates(db, tx)]
     keys = {o["key"] for o in opts}
     if tx.amount < 0:
-        opts.append({"key": "new_purchase", "label": "Dépense ponctuelle (achat) — préciser la catégorie"})
+        opts.append({"key": "daily", "label": "Dépense du quotidien (enveloppe)"})
+        opts.append({"key": "new_purchase", "label": "Achat exceptionnel — préciser la catégorie"})
         opts.append({"key": "new_charge", "label": "Nouvelle charge mensuelle à déclarer"})
     else:
         if is_joint_account(db, tx.account_id):
@@ -341,6 +350,7 @@ def options_for(db: Session, tx: BankTransaction) -> list[dict]:
                 if k not in keys:
                     opts.append({"key": k, "label": f"Abondement de {_user_name(u)}"})
         opts.append({"key": "new_income", "label": "Nouveau revenu mensuel à déclarer"})
+        opts.append({"key": "daily", "label": "Remboursement d'une dépense du quotidien"})
     opts.append({"key": "ignore", "label": "Ignorer (virement interne, remboursement…)"})
     return opts
 
@@ -435,7 +445,7 @@ def resolve(
         db.flush()
         kind = rule_kind = "income"
         target_id = inc.id
-    elif kind != "ignore":
+    elif kind not in ("ignore", "daily"):
         if target_id not in _declarations_on_account(db, kind, tx.account_id):
             raise ValueError("Déclaration introuvable sur ce compte.")
         if kind in ("recurring_transfer", "onetime_transfer") and amt > 0:
@@ -455,9 +465,8 @@ def resolve(
         tol = _tolerance(amt, "0.10")
         db.add(MatchingRule(
             user_id=user.id, account_id=tx.account_id, pattern=pattern,
-            # Un abondement varie d'un mois à l'autre : seul le nom compte
-            amount_min=None if rule_kind in ("ignore", "new_purchase", "contribution") else amt - tol,
-            amount_max=None if rule_kind in ("ignore", "new_purchase", "contribution") else amt + tol,
+            amount_min=None if rule_kind in _NO_AMOUNT_RULES else amt - tol,
+            amount_max=None if rule_kind in _NO_AMOUNT_RULES else amt + tol,
             match_kind=rule_kind,
             match_id=None if rule_kind == "new_purchase" else target_id,
             contributor_user_id=contributor, category=category,

@@ -11,6 +11,7 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
+from collections import defaultdict
 from dataclasses import dataclass, field
 from decimal import Decimal
 from statistics import median
@@ -18,11 +19,13 @@ from typing import Optional
 
 from sqlalchemy.orm import Session
 
-from models import BankTransaction, User
+from models import Account, BankTransaction, User
 from services import reconciliation as rec
 from services.access import (
     account_member_user_ids, accessible_account_ids, is_joint_account, user_can_write_account,
 )
+
+from services.envelopes import threshold_for_account
 
 logger = logging.getLogger(__name__)
 
@@ -54,13 +57,13 @@ CATEGORY_KEYWORDS: list[tuple[str, tuple[str, ...]]] = [
                             "MICROSOFT", "OPENAI", "ANTHROPIC", "PLAYSTATION", "STEAM", "RIOT", "NINTENDO",
                             "TOOMICS", "YOUTUBE", "ADOBE")),
     ("Santé", ("PHARMA", "MEDECIN", "DOCTOLIB", "DENTISTE", "OPTIC", "LABO", "HOPITAL", "MUTUELLE")),
-    ("Vêtements", ("ZARA", "H M", "KIABI", "PRIMARK", "UNIQLO", "NIKE", "ADIDAS", "DECATHLON", "JD SPORTS",
+    ("Vêtements", ("ZARA", "H M", "KIABI", "PRIMARK", "UNIQLO", "NIKE", "ADIDAS", "JD SPORTS",
                    "CELIO", "JULES", "VINTED")),
     ("Maison", ("IKEA", "LEROY", "CASTORAMA", "BRICO", "CONFORAMA", "BUT ", "ACTION", "MAISONS DU MONDE",
                 "BOULANGER", "DARTY")),
     ("Loisirs", ("CINEMA", "UGC", "PATHE", "GAUMONT", "FNAC SPECTACLES", "TICKETMASTER", "BOWLING",
                  "MUSEE", "CONCERT", "PLANETE", "JEV")),
-    ("Sport", ("BASIC FIT", "FITNESS", "SALLE DE SPORT", "ON AIR", "KEEP COOL", "NEONESS")),
+    ("Sport", ("DECATHLON", "INTERSPORT", "GO SPORT", "BASIC FIT", "FITNESS", "SALLE DE SPORT", "ON AIR", "KEEP COOL", "NEONESS")),
     ("Voyages", ("BOOKING", "AIRBNB", "HOTEL", "DUFRY", "DUTY FREE", "EXPEDIA")),
 ]
 
@@ -144,6 +147,8 @@ def suggest_groups(db: Session, user: User, account_id: Optional[int] = None) ->
         aid: _member_first_names(db, aid) for aid in {a for (a, _, _) in by_merchant} if is_joint_account(db, aid)
     }
     groups: list[Group] = []
+    daily_by_account: dict[int, list[BankTransaction]] = defaultdict(list)
+    thresholds: dict[int, Decimal] = {}
     for (account, is_debit, key), items in by_merchant.items():
         sample = rec.normalize_label(items[0].label)
         toks = set(merchant_tokens(items[0].label))
@@ -188,17 +193,28 @@ def suggest_groups(db: Session, user: User, account_id: Optional[int] = None) ->
                 ))
             else:
                 leftovers.extend(cl)
-        if not leftovers:
+        # Sous le seuil : vie quotidienne, sans détail. Au-dessus : achat exceptionnel ?
+        threshold = thresholds.setdefault(account, threshold_for_account(db, account))
+        daily_by_account[account].extend(t for t in leftovers if -Decimal(t.amount) < threshold)
+        big = [t for t in leftovers if -Decimal(t.amount) >= threshold]
+        if not big:
             continue
-        if is_transfer:
-            groups.append(_group("new_purchase", key, leftovers, category="Autre",
-                                 reason="Virement à une personne"))
-        else:
-            groups.append(_group("new_purchase", key, leftovers, category=category or "Autre",
-                                 reason="Catégorie devinée" if category else "Catégorie à préciser"))
+        reason = f"≥ {threshold:.0f} € : achat exceptionnel ou quotidien ?"
+        groups.append(_group("new_purchase", key, big, category="Autre" if is_transfer else (category or "Autre"),
+                             reason=reason))
 
-    _categorize_unknown_with_llm(db, user, [g for g in groups if g.reason == "Catégorie à préciser"])
-    order = {"contribution": 0, "new_income": 1, "new_charge": 2, "ignore": 3, "new_purchase": 4}
+    for account, items in daily_by_account.items():
+        if not items:
+            continue
+        acc = db.get(Account, account)
+        g = _group("daily", "", items, reason=f"Sous {thresholds[account]:.0f} € : comptées dans l'enveloppe, sans détail")
+        g.label = f"Dépenses du quotidien — {acc.name if acc else ''}"
+        months = _months(items)
+        g.amount = (g.total / months).quantize(Decimal("1")) if months else g.total
+        groups.append(g)
+
+    _categorize_unknown_with_llm(db, user, [g for g in groups if g.kind == "new_purchase" and g.category == "Autre"])
+    order = {"contribution": 0, "new_income": 1, "new_charge": 2, "ignore": 3, "daily": 4, "new_purchase": 5}
     groups.sort(key=lambda g: (order[g.kind], -g.total))
     return groups
 
@@ -259,6 +275,9 @@ def apply_group(
                     create_rule=create_rule, rule_pattern=rule_pattern)
         for t in rest:
             rec.resolve(db, t, user, "new_purchase", category=category)
+    elif kind == "daily":
+        for t in txs:
+            rec.resolve(db, t, user, "daily")
     elif kind == "contribution":
         rec.resolve(db, first, user, "contribution", target_id=contributor_user_id,
                     create_rule=create_rule, rule_pattern=rule_pattern)
@@ -306,4 +325,4 @@ def _categorize_unknown_with_llm(db: Session, user: User, groups: list[Group]) -
         cat = mapping.get(g.label)
         if cat in CATEGORIES and cat != "Autre":
             g.category = cat
-            g.reason = "Catégorie proposée par l'IA"
+            g.reason += " · catégorie proposée par l'IA"

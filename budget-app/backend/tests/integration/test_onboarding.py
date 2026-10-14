@@ -47,6 +47,7 @@ THREE_MONTHS = [
     "11/08/2026;Carte mcdonald's paris;-9,80",
     "12/09/2026;Carte mcdonald's paris;-9,80",
     "15/08/2026;Carte librairie des lilas;-12,00",
+    "16/08/2026;Carte decathlon velo;-349,00",
     "20/08/2026;Virement instantané émis dev user bousfrppxxx;-50,00",
     "21/08/2026;Facture CB crédit remboursement sncf;23,40",
 ]
@@ -62,11 +63,15 @@ def test_suggestions_then_apply(client, account):
     assert ("new_income", "ACME SALAIRE") in by and by[("new_income", "ACME SALAIRE")]["count"] == 3
     assert ("new_charge", "FREE MOBILE") in by
     assert ("new_charge", "NETFLIX") in by                       # abonnement carte connu
-    mcdo = next(g for g in groups if g["pattern"].startswith("MCDONALD"))
-    assert mcdo["kind"] == "new_purchase" and mcdo["category"] == "Restaurants"  # pas une « charge »
+    # Petites dépenses : une seule ligne « quotidien », sans catégorie ni détail
+    daily = [g for g in groups if g["kind"] == "daily"]
+    assert len(daily) == 1 and daily[0]["count"] == 4  # 3× McDo + librairie
+    assert not any(g["pattern"].startswith("MCDONALD") for g in groups if g["kind"] != "daily")
+    # Au-dessus du seuil (150 € par défaut) : achat exceptionnel à confirmer
+    velo = next(g for g in groups if "DECATHLON" in g["pattern"])
+    assert velo["kind"] == "new_purchase" and "exceptionnel" in velo["reason"]
     own = next(g for g in groups if "BOUSFRPPXXX" in g["pattern"])
     assert own["kind"] == "ignore"
-    assert next(g for g in groups if "LIBRAIRIE" in g["pattern"])["category"] == "Autre"
 
     r = client.post("/api/bank/onboarding/apply", json={"groups": [
         {"tx_ids": g["tx_ids"], "kind": g["kind"], "label": g["label"], "category": g["category"],
@@ -83,12 +88,14 @@ def test_suggestions_then_apply(client, account):
         salary = db.query(Income).filter(Income.account_id == account).one()
         assert salary.amount == Decimal("1802.10") and salary.valid_from.month == 7  # médiane, dès juillet
         assert {c.label for c in db.query(Charge).filter(Charge.account_id == account)} == {"Free Mobile", "Netflix"}
-        assert db.query(Purchase).filter(Purchase.account_id == account, Purchase.category == "Restaurants").count() == 3
-        assert db.query(MatchingRule).filter(MatchingRule.account_id == account).count() == len(groups)
+        assert db.query(Purchase).filter(Purchase.account_id == account).count() == 1  # le vélo seulement
+        assert db.query(BankTransaction).filter(
+            BankTransaction.account_id == account, BankTransaction.match_kind == "daily").count() == 4
     finally:
         db.close()
 
-    # Le mois suivant, tout se range tout seul
+    # Avec l'enveloppe réglée, le mois suivant se range tout seul
+    assert client.put("/api/envelopes/perso", json={"monthly_amount": 300, "threshold": 150}).status_code == 204
     r = client.post("/api/bank/import", data={"account_id": str(account)}, files={"file": ("oct.csv", _csv([
         "01/10/2026;Virement SEPA reçu ACME SALAIRE OCTOBRE;1 811,00",
         "18/10/2026;Prélèvement SEPA FREE MOBILE 1052200000001;-19,99",
@@ -96,6 +103,9 @@ def test_suggestions_then_apply(client, account):
         "14/10/2026;Carte mcdonald's paris;-11,20",
     ]), "text/csv")})
     assert r.json()["matched"] == 4, r.json()
+
+    env = next(e for e in client.get("/api/envelopes/?year=2026&month=10").json() if e["scope"] == "perso")
+    assert Decimal(env["spent"]) >= Decimal("11.20") and env["configured"]
 
 
 def test_joint_account_credits_become_contributions(client):

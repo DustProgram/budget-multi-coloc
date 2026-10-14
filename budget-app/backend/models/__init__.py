@@ -775,3 +775,26 @@ class RecoveryCode(Base):
     user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
     code_hash = Column(String(64), nullable=False)
     used_at = Column(DateTime, nullable=True)
+
+
+# ============================================================
+# Enveloppes « vie quotidienne » (perso ou commune sur compte joint)
+# ============================================================
+
+class Envelope(Base):
+    """Budget mensuel pour les petites dépenses variables, sans les détailler.
+
+    Perso : `user_id` renseigné, `account_id` nul. Commune : `account_id` = compte
+    joint, partagée à parts égales entre ses membres. Les opérations de relevé
+    sous `big_purchase_threshold` y sont comptées automatiquement (match_kind
+    'daily') ; au-dessus, l'app demande « achat exceptionnel ou quotidien ? ».
+    """
+    __tablename__ = "envelopes"
+
+    id = Column(Integer, primary_key=True)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=True, index=True)
+    account_id = Column(Integer, ForeignKey("accounts.id", ondelete="CASCADE"), nullable=True, index=True)
+    label = Column(String(64), nullable=False)
+    monthly_amount = Column(Numeric(12, 2), default=0, nullable=False)
+    big_purchase_threshold = Column(Numeric(12, 2), default=150, nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow)
