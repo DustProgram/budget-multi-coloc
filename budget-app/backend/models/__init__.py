@@ -125,6 +125,9 @@ class User(Base):
     # Canal où recevoir les questions de rapprochement : 'app' ou un canal
     # lié via ChannelLink (discord, imessage, whatsapp, telegram).
     notify_channel = Column(String(16), default="app", nullable=False)
+    # Incrémenté pour invalider toutes les sessions (changement de mot de
+    # passe, « déconnecter partout », ajout de passkey). Porté par le cookie.
+    session_version = Column(Integer, default=0, nullable=False)
 
 
 # ============================================================
@@ -744,3 +747,31 @@ class ChannelLink(Base):
     __table_args__ = (
         UniqueConstraint("channel", "handle", name="uq_channel_handle"),
     )
+
+
+# ============================================================
+# Second facteur : passkeys (WebAuthn) + codes de secours
+# ============================================================
+
+class Passkey(Base):
+    """Passkey demandée après le mot de passe dès qu'un user en a au moins une."""
+    __tablename__ = "passkeys"
+
+    id = Column(Integer, primary_key=True)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    credential_id = Column(String(1024), unique=True, nullable=False)  # base64url
+    public_key = Column(Text, nullable=False)  # base64url (COSE)
+    sign_count = Column(Integer, default=0, nullable=False)
+    transports = Column(String(128), nullable=True)
+    name = Column(String(64), nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    last_used_at = Column(DateTime, nullable=True)
+
+
+class RecoveryCode(Base):
+    __tablename__ = "recovery_codes"
+
+    id = Column(Integer, primary_key=True)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    code_hash = Column(String(64), nullable=False)
+    used_at = Column(DateTime, nullable=True)

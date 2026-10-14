@@ -86,6 +86,8 @@ class HAUserMiddleware(BaseHTTPMiddleware):
         session = read_session_cookie(cookie) if cookie else None
         if session:
             user = self._find_user(session.get("user_id"))
+            if user and int(session.get("sv", 0)) != (user.session_version or 0):
+                user = None  # session révoquée (mot de passe changé, « déconnecter partout »…)
             scope = session.get("scope", ExternalScope.FULL.value)
             if user and is_path_allowed_for_scope(path, scope):
                 request.state.user = user
@@ -116,12 +118,13 @@ class HAUserMiddleware(BaseHTTPMiddleware):
 
     @staticmethod
     def _extract_legacy_token(request: Request) -> Optional[str]:
+        if is_standalone():
+            # Accès full permanent qui contournerait la passkey et la révocation
+            # de sessions : remplacé par /api/agent pour les automatisations.
+            return None
         auth = request.headers.get("Authorization", "")
         if auth.lower().startswith("bearer "):
             return auth[7:].strip() or None
-        if is_standalone():
-            # Un token en query string finit dans les logs des proxies
-            return None
         qp = request.query_params.get("token")
         return qp.strip() if qp else None
 

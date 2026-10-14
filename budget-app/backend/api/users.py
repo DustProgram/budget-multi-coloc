@@ -1,13 +1,13 @@
 """API utilisateur courant : profil + mode pro + compte externe."""
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from pydantic import BaseModel, field_validator
 from sqlalchemy.orm import Session
 
 from models.base import get_db
 from models import ExternalCredential, ExternalScope, User
-from services.external_auth import hash_password
+from services.external_auth import hash_password, revoke_sessions
 from services.local_users import create_local_user, validate_password
 from services.security import is_standalone
 from services.tokens import generate_external_token
@@ -102,6 +102,7 @@ async def set_pro_enabled(
 async def upsert_external_account(
     payload: ExternalAccountPayload,
     request: Request,
+    response: Response,
     db: Session = Depends(get_db),
 ):
     """Crée ou met à jour le compte externe (username + password + scope).
@@ -141,7 +142,15 @@ async def upsert_external_account(
 
     db.commit()
     user = db.get(User, user_id)
-    return _to_me_out(db, user)
+    # Nouveau mot de passe → les autres appareils doivent se reconnecter
+    revoke_sessions(db, user, response, getattr(request.state, "scope", "full"))
+    return _to_me_out(db, user, getattr(request.state, "scope", "full"))
+
+
+@router.post("/me/logout-all", status_code=204)
+async def logout_everywhere(request: Request, response: Response, db: Session = Depends(get_db)):
+    """Déconnecte tous les autres appareils (la session courante reste valide)."""
+    revoke_sessions(db, db.get(User, request.state.user.id), response, getattr(request.state, "scope", "full"))
 
 
 @router.delete("/me/external-account", status_code=204)
@@ -236,7 +245,8 @@ async def update_user(
         user.display_name = payload.display_name.strip() or user.ha_username
     if payload.is_admin is not None:
         user.is_admin = payload.is_admin
-    if payload.password is not None or payload.scope is not None:
+    revoke = payload.password is not None or payload.scope is not None
+    if revoke:
         if cred is None:
             raise HTTPException(400, "Cet utilisateur n'a pas d'identifiants locaux.")
         if payload.password is not None:
@@ -247,6 +257,8 @@ async def update_user(
         if payload.scope is not None:
             cred.scope = payload.scope
     db.commit()
+    if revoke and user_id != request.state.user.id:
+        revoke_sessions(db, user)
     return _to_local_out(user, cred)
 
 
@@ -264,6 +276,8 @@ class TokenOut(BaseModel):
 
 @router.post("/me/external-token", response_model=TokenOut, deprecated=True)
 async def legacy_generate_token(request: Request, db: Session = Depends(get_db)):
+    if is_standalone():
+        raise HTTPException(410, "Désactivé : utilise l'API agent (AGENT_API_TOKEN) pour les automatisations.")
     # Le token donne un accès 'full' : interdit depuis une session limitée.
     if getattr(request.state, "scope", "full") != ExternalScope.FULL.value:
         raise HTTPException(403, "Scope insuffisant.")

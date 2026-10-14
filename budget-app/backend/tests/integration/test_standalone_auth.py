@@ -53,7 +53,7 @@ def test_ha_header_is_not_trusted(client):
     assert r.status_code == 401
 
 
-def test_query_token_ignored(client):
+def test_legacy_tokens_disabled(client):
     db = SessionLocal()
     try:
         u = db.query(User).filter(User.ha_user_id == "local:bob").first()
@@ -63,8 +63,10 @@ def test_query_token_ignored(client):
         db.close()
     assert client.get("/api/users/me?token=tok-bob-123").status_code == 401
     r = client.get("/api/users/me", headers={"Authorization": "Bearer tok-bob-123"})
-    assert r.status_code == 200
-    assert r.json()["auth_mode"] == "standalone"
+    assert r.status_code == 401
+    bob = _cookie(client, "bob", "bob-pass-1234")
+    assert client.get("/api/users/me", cookies=bob).json()["auth_mode"] == "standalone"
+    assert client.post("/api/users/me/external-token", cookies=bob).status_code == 410
 
 
 def test_security_headers_and_cookie_flags(client):
@@ -131,7 +133,10 @@ def test_coloc_scope_cannot_escalate(client):
     })
     assert r.status_code == 200
     assert r.json()["external_scope"] == "coloc"
-    assert client.post("/api/users/me/external-token", cookies=coloc).status_code == 403
+    # Le changement de mot de passe révoque l'ancien cookie et en réémet un
+    assert client.get("/api/shopping/", cookies=coloc).status_code == 401
+    coloc = {"budget_session": r.cookies["budget_session"]}
+    assert client.post("/api/users/me/external-token", cookies=coloc).status_code in (403, 410)
 
 
 def test_cannot_delete_only_credentials(client):
@@ -170,3 +175,21 @@ def test_attach_credentials_to_existing_ha_user(client):
         db.close()
     r = _login(client, "legacy-login", "legacy-pass-1")
     assert r.status_code == 200 and r.json()["user_id"] == uid
+
+
+def test_logout_all_revokes_other_sessions(client):
+    phone = _cookie(client, "bob", "bob-pass-1234")
+    laptop = _cookie(client, "bob", "bob-pass-1234")
+    r = client.post("/api/users/me/logout-all", cookies=laptop)
+    assert r.status_code == 204
+    assert client.get("/api/users/me", cookies=phone).status_code == 401
+    laptop = {"budget_session": r.cookies["budget_session"]}
+    assert client.get("/api/users/me", cookies=laptop).status_code == 200
+
+
+def test_admin_password_reset_revokes_sessions(client):
+    bob = _cookie(client, "bob", "bob-pass-1234")
+    admin = _cookie(client, "admin", "admin-pass-123")
+    uid = client.get("/api/users/me", cookies=bob).json()["user_id"]
+    client.patch(f"/api/users/{uid}", cookies=admin, json={"password": "nouveau-bob-1"})
+    assert client.get("/api/users/me", cookies=bob).status_code == 401

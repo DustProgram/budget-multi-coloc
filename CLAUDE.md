@@ -10,7 +10,7 @@ en mode `AUTH_MODE=standalone` (cf `deploy/README.md`). L'add-on Home Assistant 
 
 Passage en **standalone sur VPS** : `deploy/` (docker-compose app + Caddy HTTPS), `budget-app/Dockerfile.standalone`,
 image `ghcr.io/dustprogram/budget-multi-coloc-standalone` (workflow `build-standalone.yml`).
-Image HA toujours publiée sur `ghcr.io/dustprogram/budget-multi-coloc-{arch}`. Tests : **76/76 pytest verts**.
+Image HA toujours publiée sur `ghcr.io/dustprogram/budget-multi-coloc-{arch}`. Tests : **86/86 pytest verts**. `pip-audit` en CI.
 Rapprochement relevés ↔ déclarations + page « À valider » + API agent Hermes/n8n livrés dans la même version → `docs/AUTOMATISATIONS.md`.
 Reste : synchro bancaire directe (agrégateur DSP2).
 
@@ -161,8 +161,14 @@ Reste : synchro bancaire directe (agrégateur DSP2).
 - `/api/agent/*` : auth `AGENT_API_TOKEN` (hors middleware session), identité par `channel`+`handle` liés via code (in-memory 15 min) ou `username` (n8n)
 - Le SW cache `/api` GET en **NetworkFirst** (était StaleWhileRevalidate → listes pas à jour après mutation)
 
+### Second facteur & sessions (0.12.0)
+- Passkeys WebAuthn (`webauthn` py + `@simplewebauthn/browser`) **en plus** du mot de passe : `/api/auth/login/password` renvoie `mfa_required` + options, puis `/login/passkey` ou `/login/recovery`. État intermédiaire : cookie `budget_mfa` signé (path `/api/auth/login`, 5 min) + challenge en mémoire à usage unique (`services/passkeys.py`)
+- RP ID = `WEBAUTHN_RP_ID` ou `DOMAIN` (jamais le Host reçu) ; en dev = host de la requête
+- `User.session_version` dans le cookie (`sv`) : bump = révocation (mdp changé, 1re passkey, suppression passkey, `logout-all`, reset admin) ; la session courante est réémise
+- CLI : `create_user.py <u> --reset-2fa`
+
 ### Mode standalone (0.12.0)
-- `AUTH_MODE=standalone` : header `X-Remote-User-Id` ignoré, `?token=` ignoré, Swagger off, headers sécu + HSTS, cookies Secure/Strict
+- `AUTH_MODE=standalone` : header `X-Remote-User-Id` ignoré, tokens legacy (`?token=` et Bearer) refusés, Swagger off, headers sécu + HSTS, cookies Secure/Strict
 - Users locaux : `ha_user_id = "local:<username>"` + `ExternalCredential` (`services/local_users.py`). 1er admin via `ADMIN_USERNAME`/`ADMIN_PASSWORD` si base vide
 - Admin : `GET/POST /api/users/`, `PATCH /api/users/{id}` ; CLI `scripts/create_user.py`
 - Une session `coloc` ne peut ni s'auto-promouvoir `full` ni générer de token legacy
@@ -249,7 +255,7 @@ DEV_MODE=true LLM_API_KEY=... DATABASE_URL="sqlite:///./dev.db?check_same_thread
 # Dev frontend
 cd budget-app/frontend && npm run dev
 
-# Tests backend (76 actuellement)
+# Tests backend (86 actuellement)
 cd budget-app/backend && DEV_MODE=true DATABASE_URL="sqlite:///./test.db" .venv/bin/pytest tests/ -q
 
 # Build frontend

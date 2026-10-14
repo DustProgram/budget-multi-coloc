@@ -30,6 +30,7 @@ from api import (
     bank as bank_api,
     channels as channels_api,
     agent as agent_api,
+    passkeys as passkeys_api,
 )
 from models.base import init_db
 from services.backup import perform_monthly_backup
@@ -137,6 +138,7 @@ app.include_router(category_budgets_api.router, prefix="/api/category-budgets", 
 app.include_router(bank_api.router, prefix="/api/bank", tags=["bank"])
 app.include_router(channels_api.router, prefix="/api/channels", tags=["channels"])
 app.include_router(agent_api.router, prefix="/api/agent", tags=["agent"])
+app.include_router(passkeys_api.router, prefix="/api/passkeys", tags=["passkeys"])
 
 # ===== Frontend statique (PWA) =====
 static_dir = Path(os.environ.get("STATIC_DIR", "/app/static"))

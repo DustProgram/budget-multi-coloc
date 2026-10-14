@@ -3,6 +3,7 @@
     docker compose exec app python scripts/create_user.py <username> [--admin] [--coloc] [--reset]
     docker compose exec app python scripts/create_user.py --list
     docker compose exec app python scripts/create_user.py <username> --user-id <id> --admin
+    docker compose exec app python scripts/create_user.py <username> --reset-2fa
 
 `--user-id` rattache l'identifiant à un utilisateur existant (base reprise
 de Home Assistant) au lieu d'en créer un nouveau : ses données sont conservées.
@@ -19,7 +20,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from models import ExternalCredential, ExternalScope, User  # noqa: E402
 from models.base import SessionLocal, init_db  # noqa: E402
-from services.external_auth import hash_password  # noqa: E402
+from services.external_auth import hash_password, revoke_sessions  # noqa: E402
+from services.passkeys import disable_second_factor  # noqa: E402
 from services.local_users import (  # noqa: E402
     attach_credentials, create_local_user, validate_password,
 )
@@ -34,6 +36,8 @@ def main() -> int:
     p.add_argument("--admin", action="store_true")
     p.add_argument("--coloc", action="store_true", help="scope limité (courses, chat, récap coloc)")
     p.add_argument("--reset", action="store_true", help="change le mot de passe d'un compte existant")
+    p.add_argument("--reset-2fa", action="store_true",
+                   help="supprime passkeys et codes de secours (téléphone perdu)")
     args = p.parse_args()
 
     if args.list:
@@ -50,6 +54,21 @@ def main() -> int:
     if not args.username:
         p.error("username requis")
 
+    if args.reset_2fa:
+        init_db()
+        db = SessionLocal()
+        try:
+            cred = db.query(ExternalCredential).filter(ExternalCredential.username == args.username).first()
+            if not cred:
+                print("Compte introuvable.", file=sys.stderr)
+                return 1
+            disable_second_factor(db, cred.user_id)
+            revoke_sessions(db, db.get(User, cred.user_id))
+            print(f"Passkeys et codes de secours de {args.username} supprimés, sessions fermées.")
+            return 0
+        finally:
+            db.close()
+
     password = getpass.getpass("Mot de passe : ")
     if password != getpass.getpass("Confirmation : "):
         print("Les mots de passe ne correspondent pas.", file=sys.stderr)
@@ -64,7 +83,7 @@ def main() -> int:
                 print("Compte introuvable.", file=sys.stderr)
                 return 1
             cred.password_hash = hash_password(validate_password(password))
-            db.commit()
+            revoke_sessions(db, db.get(User, cred.user_id))
             print(f"Mot de passe de {args.username} mis à jour.")
             return 0
         scope = ExternalScope.COLOC if args.coloc else ExternalScope.FULL

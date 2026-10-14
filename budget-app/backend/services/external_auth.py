@@ -19,6 +19,8 @@ from itsdangerous import BadSignature, SignatureExpired, URLSafeTimedSerializer
 from models import ExternalScope
 
 COOKIE_NAME = "budget_session"
+MFA_COOKIE_NAME = "budget_mfa"
+MFA_MAX_AGE = 300
 COOKIE_MAX_AGE = 60 * 60 * 24 * 30  # 30 jours
 SECRET_PATH = Path(os.environ.get("DATA_DIR", "/data")) / ".session_secret"
 
@@ -67,15 +69,57 @@ def verify_password(password: str, hashed: str) -> bool:
         return False
 
 
-def make_session_cookie(user_id: int, scope: ExternalScope | str) -> str:
-    """Sérialise + signe un payload de session. Inclut une expiration."""
+def make_session_cookie(user_id: int, scope: ExternalScope | str, session_version: int = 0) -> str:
+    """Sérialise + signe un payload de session. Inclut une expiration.
+
+    `sv` = User.session_version au moment du login : l'incrémenter côté
+    serveur invalide tous les cookies existants.
+    """
     scope_value = scope.value if hasattr(scope, "value") else str(scope)
     payload = {
         "user_id": int(user_id),
         "scope": scope_value,
+        "sv": int(session_version or 0),
         "iat": datetime.now(timezone.utc).isoformat(),
     }
     return _get_serializer().dumps(json.dumps(payload))
+
+
+def set_session_cookie(response, user, scope: ExternalScope | str) -> None:
+    from services.security import cookie_secure, is_standalone
+    response.set_cookie(
+        key=COOKIE_NAME,
+        value=make_session_cookie(user.id, scope, user.session_version or 0),
+        max_age=COOKIE_MAX_AGE,
+        httponly=True,
+        samesite="strict" if is_standalone() else "lax",
+        secure=cookie_secure(),
+        path="/",
+    )
+
+
+def revoke_sessions(db, user, response=None, scope: ExternalScope | str = ExternalScope.FULL) -> None:
+    """Invalide toutes les sessions du user ; si `response` est fourni,
+    réémet un cookie valide pour la session courante (on ne se déconnecte pas soi-même)."""
+    user.session_version = (user.session_version or 0) + 1
+    db.commit()
+    if response is not None:
+        set_session_cookie(response, user, scope)
+
+
+def _mfa_serializer() -> URLSafeTimedSerializer:
+    return URLSafeTimedSerializer(_get_serializer().secret_key, salt="budget-mfa")
+
+
+def make_mfa_cookie(nonce: str) -> str:
+    return _mfa_serializer().dumps(nonce)
+
+
+def read_mfa_cookie(value: str) -> Optional[str]:
+    try:
+        return _mfa_serializer().loads(value, max_age=MFA_MAX_AGE)
+    except (BadSignature, SignatureExpired):
+        return None
 
 
 def read_session_cookie(cookie_value: str) -> Optional[dict]:
@@ -111,6 +155,7 @@ def _is_coloc_path(path: str) -> bool:
         "/api/shopping",                # courses
         "/api/coloc",                   # récap coloc
         "/api/households",              # foyer + chat
+        "/api/passkeys",                # sa propre sécurité
         "/api/notifier/status",
     )
     if any(path == p or path.startswith(p + "/") or path.startswith(p + "?") for p in allowed_prefixes):

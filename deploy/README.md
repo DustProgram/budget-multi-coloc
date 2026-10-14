@@ -129,13 +129,22 @@ docker compose start app
 | Rate-limit login : 5 essais/min/IP → 429 | `services/security.py` |
 | Verrouillage du compte 15 min après 10 échecs | `services/security.py` |
 | Header `X-Remote-User-Id` (HA) ignoré → pas d'usurpation | `services/auth.py` |
-| `?token=` refusé (seulement `Authorization: Bearer`) | `services/auth.py` |
+| Anciens tokens d'accès (`?token=`, `Bearer`) désactivés : ils contourneraient la passkey | `services/auth.py` |
 | Swagger `/api/docs` désactivé (`ENABLE_API_DOCS=true` pour le réactiver) | `main.py` |
 | Requêtes > 15 Mo refusées | Caddy + `MaxBodySizeMiddleware` |
 | Conteneur non-root, `cap_drop: ALL`, `no-new-privileges`, port 8000 non publié | `docker-compose.yml` |
 | Cache offline du navigateur vidé à la connexion/déconnexion | `lib/AuthGate.tsx` |
 | Tentatives de login journalisées (IP + username) | `docker compose logs app` |
+| Double authentification : mot de passe **+ passkey** (Face ID, Touch ID, empreinte) + 10 codes de secours | Réglages → Sécurité |
+| Changer de mot de passe ou ajouter une passkey déconnecte les autres appareils ; bouton « Déconnecter mes autres appareils » | `User.session_version` |
+| Dépendances auditées à chaque push (`pip-audit` en CI) | `.github/workflows/test.yml` |
 
-À savoir : les sessions sont des cookies signés valables 30 jours. Changer un mot de passe
-ne déconnecte pas les sessions déjà ouvertes. Pour tout invalider d'un coup :
+**Passkeys** : elles sont liées au domaine (`DOMAIN` dans `.env`). Changer de domaine plus tard
+oblige chacun à recréer sa passkey (le mot de passe + un code de secours permettent de se reconnecter).
+
+**Quelqu'un a perdu téléphone et codes de secours** :
+`docker compose exec app python scripts/create_user.py <username> --reset-2fa`
+(supprime ses passkeys et ses codes, ferme ses sessions ; il se reconnecte avec son mot de passe et réactive une passkey).
+
+**Tout invalider d'un coup** (fuite suspectée) :
 `docker compose exec app rm /data/.session_secret && docker compose restart app`.

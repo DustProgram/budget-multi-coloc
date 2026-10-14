@@ -2,8 +2,9 @@ import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   KeyRound, RefreshCw, Trash2, AlertTriangle, Bell, BellRing,
-  Briefcase, Home, Plus, User as UserIcon, Lock, Shield,
+  Briefcase, Home, Plus, User as UserIcon, Lock, Shield, Fingerprint, LogOut,
 } from 'lucide-react';
+import { startRegistration, type PublicKeyCredentialCreationOptionsJSON } from '@simplewebauthn/browser';
 import { api } from '../lib/api';
 import {
   Button, Card, ErrorBox, Field, Input, Loader, PageHeader, Select,
@@ -82,6 +83,7 @@ export function Settings() {
           <HouseholdCard />
           <ExternalAccountCard me={me.data} standalone={standalone}
             onChanged={() => qc.invalidateQueries({ queryKey: ['me'] })} />
+          <SecurityCard />
           <ChannelsCard />
           <ProCard me={me.data} onChanged={() => qc.invalidateQueries({ queryKey: ['me'] })} />
           {!standalone && <NotifCard available={notifier.data?.ha_available ?? false} />}
@@ -513,6 +515,159 @@ function NotifCard({ available }: { available: boolean }) {
           {testNotif.isPending ? 'Envoi…' : 'Tester une notif'}
         </Button>
       </div>
+    </Card>
+  );
+}
+
+// ============================================================
+// Sécurité : passkeys (second facteur), codes de secours, sessions
+// ============================================================
+
+interface SecurityOut {
+  passkeys: { id: number; name: string; created_at: string; last_used_at: string | null }[];
+  recovery_codes_remaining: number;
+}
+
+function guessDeviceName(): string {
+  const ua = navigator.userAgent;
+  if (/iPhone/.test(ua)) return 'iPhone';
+  if (/iPad/.test(ua)) return 'iPad';
+  if (/Android/.test(ua)) return 'Android';
+  if (/Mac/.test(ua)) return 'Mac';
+  if (/Windows/.test(ua)) return 'PC Windows';
+  return 'Mon appareil';
+}
+
+function SecurityCard() {
+  const qc = useQueryClient();
+  const sec = useQuery({
+    queryKey: ['security'],
+    queryFn: async () => (await api.get<SecurityOut>('/passkeys/')).data,
+  });
+  const [name, setName] = useState(guessDeviceName());
+  const [codes, setCodes] = useState<string[] | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [info, setInfo] = useState<string | null>(null);
+  const refresh = () => qc.invalidateQueries({ queryKey: ['security'] });
+
+  const add = useMutation({
+    mutationFn: async () => {
+      const options = (await api.post<PublicKeyCredentialCreationOptionsJSON>('/passkeys/register/options')).data;
+      const credential = await startRegistration({ optionsJSON: options });
+      return (await api.post<{ recovery_codes: string[] | null }>('/passkeys/register', { credential, name })).data;
+    },
+    onSuccess: (d) => { if (d.recovery_codes) setCodes(d.recovery_codes); setInfo('✓ Passkey ajoutée.'); refresh(); },
+    onError: (e) => setError(
+      e instanceof Error && e.name === 'NotAllowedError' ? 'Ajout annulé.'
+        : e instanceof Error && e.name === 'InvalidStateError' ? 'Cet appareil a déjà une passkey pour ce compte.'
+          : errDetail(e),
+    ),
+  });
+  const remove = useMutation({
+    mutationFn: async (id: number) => api.delete(`/passkeys/${id}`),
+    onSuccess: refresh,
+  });
+  const regen = useMutation({
+    mutationFn: async () => (await api.post<{ recovery_codes: string[] }>('/passkeys/recovery-codes')).data,
+    onSuccess: (d) => { setCodes(d.recovery_codes); refresh(); },
+  });
+  const logoutAll = useMutation({
+    mutationFn: async () => api.post('/users/me/logout-all'),
+    onSuccess: () => setInfo('✓ Tous tes autres appareils sont déconnectés.'),
+  });
+
+  const d = sec.data;
+  const enabled = (d?.passkeys.length ?? 0) > 0;
+
+  return (
+    <Card>
+      <div className="row gap-2" style={{ alignItems: 'center', marginBottom: 4 }}>
+        <Fingerprint size={16} style={{ color: 'var(--ink-2)' }} />
+        <p className="eyebrow" style={{ margin: 0 }}>Sécurité</p>
+      </div>
+      <h3 style={{ fontFamily: 'var(--display)', fontSize: 22, margin: '4px 0 8px' }}>
+        Double authentification
+      </h3>
+      <p className="small muted">
+        Avec une passkey, la connexion demande ton mot de passe <strong>puis</strong> Face ID,
+        Touch ID ou ton empreinte. Un mot de passe volé ne suffit plus.
+      </p>
+      <div className={`pill ${enabled ? 'sage' : 'amber'}`} style={{ margin: '4px 0 12px' }}>
+        {enabled ? 'Activée' : 'Désactivée'}
+      </div>
+
+      {d?.passkeys.map((p) => (
+        <div key={p.id} className="row between small" style={{
+          alignItems: 'center', padding: '8px 10px', borderRadius: 8, background: 'var(--bg-sunken)', marginBottom: 6,
+        }}>
+          <span>
+            <strong>{p.name}</strong>
+            <span className="muted"> · ajoutée le {new Date(p.created_at).toLocaleDateString('fr-FR')}
+              {p.last_used_at && ` · utilisée le ${new Date(p.last_used_at).toLocaleDateString('fr-FR')}`}</span>
+          </span>
+          <Button variant="ghost" aria-label="Supprimer la passkey" onClick={() => {
+            const last = d.passkeys.length === 1;
+            if (confirm(last ? 'Supprimer ta dernière passkey désactive la double authentification. Continuer ?'
+              : `Supprimer la passkey « ${p.name} » ?`)) remove.mutate(p.id);
+          }}><Trash2 size={12} /></Button>
+        </div>
+      ))}
+
+      <form onSubmit={(e) => { e.preventDefault(); setError(null); setInfo(null); add.mutate(); }}
+        className="row gap-2" style={{ alignItems: 'flex-end', marginTop: 8, flexWrap: 'wrap' }}>
+        <div style={{ flex: 1, minWidth: 160 }}>
+          <Field label="Nom de l'appareil">
+            <Input value={name} onChange={(e) => setName(e.target.value)} maxLength={64} required />
+          </Field>
+        </div>
+        <Button type="submit" variant="primary" disabled={add.isPending} style={{ marginBottom: 14 }}>
+          <Plus size={14} /> {enabled ? 'Ajouter une passkey' : 'Activer avec une passkey'}
+        </Button>
+      </form>
+      {enabled && (
+        <p className="small muted" style={{ marginTop: 0 }}>
+          Ajoute aussi une passkey sur un 2e appareil (ordinateur + téléphone) pour ne pas dépendre d'un seul.
+        </p>
+      )}
+
+      {codes && (
+        <div style={{ padding: '12px 14px', borderRadius: 10, background: 'var(--amber-bg, oklch(0.94 0.04 80))', margin: '8px 0' }}>
+          <p className="small" style={{ marginTop: 0 }}>
+            <strong>Codes de secours</strong> — chacun ne sert qu'une fois, si tu perds tes appareils.
+            Note-les dans ton gestionnaire de mots de passe : <strong>ils ne seront plus affichés</strong>.
+          </p>
+          <pre style={{ margin: 0, fontFamily: 'var(--mono, monospace)', fontSize: 14, columns: 2 }}>
+            {codes.join('\n')}
+          </pre>
+          <div className="row gap-2" style={{ marginTop: 10 }}>
+            <Button onClick={() => navigator.clipboard?.writeText(codes.join('\n'))}>Copier</Button>
+            <Button variant="primary" onClick={() => setCodes(null)}>Je les ai notés</Button>
+          </div>
+        </div>
+      )}
+      {enabled && !codes && (
+        <div className="row between small" style={{ alignItems: 'center', marginTop: 4 }}>
+          <span className={d!.recovery_codes_remaining <= 3 ? 'neg' : 'muted'}>
+            {d!.recovery_codes_remaining} code(s) de secours restant(s)
+          </span>
+          <Button variant="ghost" onClick={() => {
+            if (confirm('Les anciens codes ne marcheront plus. Générer de nouveaux codes ?')) regen.mutate();
+          }}><RefreshCw size={12} /> Nouveaux codes</Button>
+        </div>
+      )}
+
+      <div style={{ borderTop: '1px solid var(--line)', marginTop: 14, paddingTop: 12 }}>
+        <Button onClick={() => {
+          if (confirm('Déconnecter tous tes autres appareils ? (celui-ci reste connecté)')) logoutAll.mutate();
+        }} disabled={logoutAll.isPending}>
+          <LogOut size={14} /> Déconnecter mes autres appareils
+        </Button>
+        <p className="small muted" style={{ marginBottom: 0 }}>
+          Changer de mot de passe le fait aussi automatiquement.
+        </p>
+      </div>
+      {error && <ErrorBox message={error} />}
+      {info && <div className="small pos" style={{ marginTop: 8 }}>{info}</div>}
     </Card>
   );
 }
