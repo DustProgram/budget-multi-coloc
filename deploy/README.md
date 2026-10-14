@@ -135,14 +135,14 @@ docker compose start app
 | Conteneur non-root, `cap_drop: ALL`, `no-new-privileges`, port 8000 non publié | `docker-compose.yml` |
 | Cache offline du navigateur vidé à la connexion/déconnexion | `lib/AuthGate.tsx` |
 | Tentatives de login journalisées (IP + username) | `docker compose logs app` |
-| Double authentification : mot de passe **+ passkey** (Face ID, Touch ID, empreinte) + 10 codes de secours | Réglages → Sécurité |
+| Connexion : **mot de passe + code à 6 chiffres** (appli d'authentification) ou **passkey seule** (Face ID, Touch ID, empreinte), + 10 codes de secours | Réglages → Sécurité |
 | Changer de mot de passe ou ajouter une passkey déconnecte les autres appareils ; bouton « Déconnecter mes autres appareils » | `User.session_version` |
 | Dépendances auditées à chaque push (`pip-audit` en CI) | `.github/workflows/test.yml` |
 
 **Passkeys** : elles sont liées au domaine (`DOMAIN` dans `.env`). Changer de domaine plus tard
 oblige chacun à recréer sa passkey (le mot de passe + un code de secours permettent de se reconnecter).
 
-**Quelqu'un a perdu téléphone et codes de secours** :
+**Quelqu'un a perdu son téléphone (appli et passkey) et ses codes de secours** :
 `docker compose exec app python scripts/create_user.py <username> --reset-2fa`
 (supprime ses passkeys et ses codes, ferme ses sessions ; il se reconnecte avec son mot de passe et réactive une passkey).
 

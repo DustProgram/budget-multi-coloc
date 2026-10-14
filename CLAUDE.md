@@ -10,7 +10,7 @@ en mode `AUTH_MODE=standalone` (cf `deploy/README.md`). L'add-on Home Assistant 
 
 Passage en **standalone sur VPS** : `deploy/` (docker-compose app + Caddy HTTPS), `budget-app/Dockerfile.standalone`,
 image `ghcr.io/dustprogram/budget-multi-coloc-standalone` (workflow `build-standalone.yml`).
-Image HA toujours publiée sur `ghcr.io/dustprogram/budget-multi-coloc-{arch}`. Tests : **95/95 pytest verts**. `pip-audit` en CI.
+Image HA toujours publiée sur `ghcr.io/dustprogram/budget-multi-coloc-{arch}`. Tests : **98/98 pytest verts**. `pip-audit` en CI.
 Rapprochement relevés ↔ déclarations + page « À valider » + API agent Hermes/n8n livrés dans la même version → `docs/AUTOMATISATIONS.md`.
 Reste : synchro bancaire directe (agrégateur DSP2).
 
@@ -176,7 +176,9 @@ Reste : synchro bancaire directe (agrégateur DSP2).
 - Démarrage rapide : toutes les petites dépenses d'un compte = **un seul groupe « daily »**
 
 ### Second facteur & sessions (0.12.0)
-- Passkeys WebAuthn (`webauthn` py + `@simplewebauthn/browser`) **en plus** du mot de passe : `/api/auth/login/password` renvoie `mfa_required` + options, puis `/login/passkey` ou `/login/recovery`. État intermédiaire : cookie `budget_mfa` signé (path `/api/auth/login`, 5 min) + challenge en mémoire à usage unique (`services/passkeys.py`)
+- Deux façons de se connecter : **mot de passe + second facteur** (code TOTP d'une appli, `pyotp`, ou passkey, ou code de secours) **ou passkey seule** (WebAuthn discoverable, `user_verification=required`, `/api/auth/login/passkey/start` + `/finish`)
+- `/api/auth/login/password` renvoie `mfa_required` + `methods` (`totp`/`passkey`/`recovery`), puis `/login/totp`, `/login/passkey` ou `/login/recovery`. État intermédiaire : cookie `budget_mfa` signé (path `/api/auth/login`, 5 min) + état en mémoire (`services/passkeys.py`). Un code TOTP faux ne consomme pas l'étape (rate-limit + lockout bornent) ; anti-rejeu via `User.totp_last_step`
+- TOTP : `User.totp_secret/totp_enabled/totp_last_step`, `POST /api/passkeys/totp/setup` (QR SVG via `segno`), `/totp/enable`, `/totp/disable` (code requis)
 - RP ID = `WEBAUTHN_RP_ID` ou `DOMAIN` (jamais le Host reçu) ; en dev = host de la requête
 - `User.session_version` dans le cookie (`sv`) : bump = révocation (mdp changé, 1re passkey, suppression passkey, `logout-all`, reset admin) ; la session courante est réémise
 - CLI : `create_user.py <u> --reset-2fa`
@@ -269,7 +271,7 @@ DEV_MODE=true LLM_API_KEY=... DATABASE_URL="sqlite:///./dev.db?check_same_thread
 # Dev frontend
 cd budget-app/frontend && npm run dev
 
-# Tests backend (95 actuellement)
+# Tests backend (98 actuellement)
 cd budget-app/backend && DEV_MODE=true DATABASE_URL="sqlite:///./test.db" .venv/bin/pytest tests/ -q
 
 # Build frontend

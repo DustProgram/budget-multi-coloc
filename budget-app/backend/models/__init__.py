@@ -128,6 +128,10 @@ class User(Base):
     # Incrémenté pour invalider toutes les sessions (changement de mot de
     # passe, « déconnecter partout », ajout de passkey). Porté par le cookie.
     session_version = Column(Integer, default=0, nullable=False)
+    # Double authentification par appli (code à 6 chiffres, RFC 6238)
+    totp_secret = Column(String(64), nullable=True)
+    totp_enabled = Column(Boolean, default=False, nullable=False)
+    totp_last_step = Column(Integer, default=0, nullable=False)  # anti-rejeu d'un code déjà utilisé
 
 
 # ============================================================

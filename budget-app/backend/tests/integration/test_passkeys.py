@@ -87,6 +87,9 @@ def setup(monkeypatch, client):
         db.query(User).filter(User.ha_user_id == "local:alice").delete(synchronize_session=False)
         db.commit()
         create_local_user(db, "alice", "alice-pass-123")
+        # Les autres modules de tests ne doivent pas hériter d'une 2FA
+        db.query(User).update({User.totp_enabled: False, User.totp_secret: None, User.totp_last_step: 0})
+        db.commit()
     finally:
         db.close()
     yield
@@ -180,3 +183,72 @@ def test_rp_id_from_domain_rejects_other_origin(client, monkeypatch):
     assert opts["rp"]["id"] == "budget.example.fr"
     r = client.post("/api/passkeys/register", cookies=session, json={"credential": auth.register(opts)})
     assert r.status_code == 422
+
+
+# ============================================================
+# Code à 6 chiffres (appli d'authentification)
+# ============================================================
+
+def test_totp_enable_login_replay_disable(client, monkeypatch):
+    import time as _time
+
+    import pyotp
+    from services import passkeys as svc
+
+    session = {"budget_session": _password(client).cookies["budget_session"]}
+    setup = client.post("/api/passkeys/totp/setup", cookies=session).json()
+    assert setup["otpauth_uri"].startswith("otpauth://totp/") and setup["qr_svg"].startswith("data:image/svg+xml")
+    totp = pyotp.TOTP(setup["secret"])
+    t0 = (int(_time.time()) // 30 + 1) * 30 + 5  # après l'émission du cookie (sinon signature « du futur »)
+    monkeypatch.setattr(svc.time, "time", lambda: t0)
+
+    assert client.post("/api/passkeys/totp/enable", cookies=session, json={"code": "000000"}).status_code == 422
+    r = client.post("/api/passkeys/totp/enable", cookies=session, json={"code": totp.at(t0)})
+    assert r.status_code == 200 and len(r.json()["recovery_codes"]) == 10
+    client.cookies.clear()
+
+    body = _password(client).json()
+    assert body["mfa_required"] and body["methods"] == ["totp", "recovery"] and body["passkey_options"] is None
+    mfa = {"budget_mfa": _password(client).cookies["budget_mfa"]}
+    # Une faute de frappe ne force pas à retaper le mot de passe
+    assert client.post("/api/auth/login/totp", cookies=mfa, json={"code": "123456"}).status_code == 401
+    r = client.post("/api/auth/login/totp", cookies=mfa, json={"code": totp.at(t0 + 30)})
+    assert r.status_code == 200, r.text
+    new_session = {"budget_session": r.cookies["budget_session"]}
+    client.cookies.clear()
+
+    login_guard.reset()  # le test enchaîne plus de 5 connexions/minute
+    # Même code réutilisé (rejeu) : refusé
+    mfa = {"budget_mfa": _password(client).cookies["budget_mfa"]}
+    assert client.post("/api/auth/login/totp", cookies=mfa, json={"code": totp.at(t0 + 30)}).status_code == 401
+
+    login_guard.reset()  # le test enchaîne plus de 5 connexions/minute
+    monkeypatch.setattr(svc.time, "time", lambda: t0 + 60)
+    r = client.post("/api/passkeys/totp/disable", cookies=new_session, json={"code": totp.at(t0 + 60)})
+    assert r.status_code == 200 and r.json()["totp_enabled"] is False
+    assert r.json()["recovery_codes_remaining"] == 0
+    assert _password(client).json()["mfa_required"] is False
+
+
+# ============================================================
+# Passkey seule, sans mot de passe
+# ============================================================
+
+def test_passwordless_login(client):
+    auth, _, _ = _enroll(client)
+    start = client.post("/api/auth/login/passkey/start")
+    opts = start.json()["passkey_options"]
+    assert not opts.get("allowCredentials")  # l'appareil propose ses passkeys, pas d'identifiant à saisir
+    assert opts["userVerification"] == "required"
+    r = client.post("/api/auth/login/passkey/finish", cookies={"budget_mfa": start.cookies["budget_mfa"]},
+                    json={"credential": auth.assert_(opts)})
+    assert r.status_code == 200, r.text
+    assert client.get("/api/users/me", cookies={"budget_session": r.cookies["budget_session"]}).status_code == 200
+
+
+def test_passwordless_unknown_key_rejected(client):
+    _enroll(client)
+    start = client.post("/api/auth/login/passkey/start")
+    r = client.post("/api/auth/login/passkey/finish", cookies={"budget_mfa": start.cookies["budget_mfa"]},
+                    json={"credential": SoftAuthenticator().assert_(start.json()["passkey_options"])})
+    assert r.status_code == 401

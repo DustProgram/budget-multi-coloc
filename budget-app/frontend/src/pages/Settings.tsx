@@ -525,8 +525,11 @@ function NotifCard({ available }: { available: boolean }) {
 
 interface SecurityOut {
   passkeys: { id: number; name: string; created_at: string; last_used_at: string | null }[];
+  totp_enabled: boolean;
   recovery_codes_remaining: number;
 }
+
+interface TotpSetup { secret: string; otpauth_uri: string; qr_svg: string }
 
 function guessDeviceName(): string {
   const ua = navigator.userAgent;
@@ -575,9 +578,30 @@ function SecurityCard() {
     mutationFn: async () => api.post('/users/me/logout-all'),
     onSuccess: () => setInfo('✓ Tous tes autres appareils sont déconnectés.'),
   });
+  const [totp, setTotp] = useState<TotpSetup | null>(null);
+  const [totpCode, setTotpCode] = useState('');
+  const totpStart = useMutation({
+    mutationFn: async () => (await api.post<TotpSetup>('/passkeys/totp/setup')).data,
+    onSuccess: (d) => { setTotp(d); setTotpCode(''); },
+    onError: (e) => setError(errDetail(e)),
+  });
+  const totpEnable = useMutation({
+    mutationFn: async () => (await api.post<{ recovery_codes: string[] | null }>('/passkeys/totp/enable', { code: totpCode })).data,
+    onSuccess: (d) => {
+      setTotp(null); setTotpCode('');
+      if (d.recovery_codes) setCodes(d.recovery_codes);
+      setInfo("✓ Double authentification par appli activée."); refresh();
+    },
+    onError: (e) => setError(errDetail(e)),
+  });
+  const totpDisable = useMutation({
+    mutationFn: async () => api.post('/passkeys/totp/disable', { code: totpCode }),
+    onSuccess: () => { setTotpCode(''); setInfo('Appli d\'authentification retirée.'); refresh(); },
+    onError: (e) => setError(errDetail(e)),
+  });
 
   const d = sec.data;
-  const enabled = (d?.passkeys.length ?? 0) > 0;
+  const enabled = (d?.passkeys.length ?? 0) > 0 || !!d?.totp_enabled;
 
   return (
     <Card>
@@ -589,12 +613,62 @@ function SecurityCard() {
         Double authentification
       </h3>
       <p className="small muted">
-        Avec une passkey, la connexion demande ton mot de passe <strong>puis</strong> Face ID,
-        Touch ID ou ton empreinte. Un mot de passe volé ne suffit plus.
+        Deux façons de sécuriser ton compte (tu peux avoir les deux) : un <strong>code à 6 chiffres</strong>{' '}
+        demandé après le mot de passe, ou une <strong>passkey</strong> pour te connecter
+        avec Face ID / Touch ID / empreinte, sans mot de passe.
       </p>
       <div className={`pill ${enabled ? 'sage' : 'amber'}`} style={{ margin: '4px 0 12px' }}>
-        {enabled ? 'Activée' : 'Désactivée'}
+        {enabled ? 'Activée' : 'Désactivée — un mot de passe volé suffit à entrer'}
       </div>
+
+      <p className="eyebrow" style={{ margin: '10px 0 6px' }}>Mot de passe + code à 6 chiffres</p>
+      {d?.totp_enabled ? (
+        <form onSubmit={(e) => { e.preventDefault(); setError(null); setInfo(null); totpDisable.mutate(); }}
+          className="row gap-2" style={{ alignItems: 'flex-end', flexWrap: 'wrap' }}>
+          <span className="pill sage" style={{ marginBottom: 14 }}>Appli d'authentification active</span>
+          <div style={{ flex: 1, minWidth: 140 }}>
+            <Field label="Code actuel pour la retirer">
+              <Input value={totpCode} onChange={(e) => setTotpCode(e.target.value)} inputMode="numeric"
+                maxLength={6} placeholder="123456" autoComplete="one-time-code" />
+            </Field>
+          </div>
+          <Button type="submit" disabled={totpCode.length !== 6 || totpDisable.isPending} style={{ marginBottom: 14 }}>
+            Retirer
+          </Button>
+        </form>
+      ) : totp ? (
+        <form onSubmit={(e) => { e.preventDefault(); setError(null); totpEnable.mutate(); }}>
+          <p className="small" style={{ marginTop: 0 }}>
+            1. Scanne ce QR code avec ton appli (Google Authenticator, Authy, 1Password, trousseau iCloud…)
+            {' '}— ou sur ce téléphone : <a href={totp.otpauth_uri}>ouvrir dans l'appli</a>.
+          </p>
+          <div className="row gap-2" style={{ alignItems: 'center', flexWrap: 'wrap', marginBottom: 10 }}>
+            <img src={totp.qr_svg} alt="QR code de l'appli d'authentification" width={160} height={160}
+              style={{ background: '#fff', borderRadius: 8 }} />
+            <div className="small muted" style={{ flex: 1, minWidth: 160, wordBreak: 'break-all' }}>
+              Clé à saisir à la main si besoin :<br /><code>{totp.secret}</code>
+            </div>
+          </div>
+          <div className="row gap-2" style={{ alignItems: 'flex-end', flexWrap: 'wrap' }}>
+            <div style={{ flex: 1, minWidth: 140 }}>
+              <Field label="2. Code affiché par l'appli">
+                <Input value={totpCode} onChange={(e) => setTotpCode(e.target.value)} inputMode="numeric"
+                  maxLength={6} placeholder="123456" autoComplete="one-time-code" autoFocus required />
+              </Field>
+            </div>
+            <Button type="submit" variant="primary" disabled={totpCode.length !== 6 || totpEnable.isPending} style={{ marginBottom: 14 }}>
+              Activer
+            </Button>
+            <Button type="button" onClick={() => setTotp(null)} style={{ marginBottom: 14 }}>Annuler</Button>
+          </div>
+        </form>
+      ) : (
+        <Button onClick={() => { setError(null); setInfo(null); totpStart.mutate(); }} disabled={totpStart.isPending}>
+          <Plus size={14} /> Activer avec une appli d'authentification
+        </Button>
+      )}
+
+      <p className="eyebrow" style={{ margin: '18px 0 6px' }}>Passkeys (connexion sans mot de passe)</p>
 
       {d?.passkeys.map((p) => (
         <div key={p.id} className="row between small" style={{
@@ -607,7 +681,7 @@ function SecurityCard() {
           </span>
           <Button variant="ghost" aria-label="Supprimer la passkey" onClick={() => {
             const last = d.passkeys.length === 1;
-            if (confirm(last ? 'Supprimer ta dernière passkey désactive la double authentification. Continuer ?'
+            if (confirm(last && !d.totp_enabled ? 'Supprimer ta dernière passkey désactive la double authentification. Continuer ?'
               : `Supprimer la passkey « ${p.name} » ?`)) remove.mutate(p.id);
           }}><Trash2 size={12} /></Button>
         </div>
@@ -621,12 +695,13 @@ function SecurityCard() {
           </Field>
         </div>
         <Button type="submit" variant="primary" disabled={add.isPending} style={{ marginBottom: 14 }}>
-          <Plus size={14} /> {enabled ? 'Ajouter une passkey' : 'Activer avec une passkey'}
+          <Plus size={14} /> {(d?.passkeys.length ?? 0) > 0 ? 'Ajouter une passkey' : 'Créer une passkey sur cet appareil'}
         </Button>
       </form>
-      {enabled && (
+      {(d?.passkeys.length ?? 0) > 0 && (
         <p className="small muted" style={{ marginTop: 0 }}>
           Ajoute aussi une passkey sur un 2e appareil (ordinateur + téléphone) pour ne pas dépendre d'un seul.
+          Elle sert aussi de deuxième étape après le mot de passe.
         </p>
       )}
 

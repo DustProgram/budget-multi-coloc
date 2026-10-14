@@ -20,3 +20,5 @@ openpyxl==3.1.5
 pypdf==6.20.1
 webauthn==3.0.1
 pdfminer.six==20260107
+pyotp==2.10.0
+segno==1.6.6

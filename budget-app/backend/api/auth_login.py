@@ -2,9 +2,11 @@
 
 Public (avant le middleware d'auth) :
 - POST /api/auth/login/password   → username + password → cookie session,
-  ou, si le user a une passkey, `mfa_required` + options WebAuthn
+  ou, si le user a un second facteur, `mfa_required` + méthodes possibles
+- POST /api/auth/login/totp       → second facteur : code à 6 chiffres
 - POST /api/auth/login/passkey    → second facteur : assertion WebAuthn
 - POST /api/auth/login/recovery   → second facteur : code de secours
+- POST /api/auth/login/passkey/start + /finish → passkey seule, sans mot de passe
 
 L'ancien endpoint GET /users a été retiré en 0.4.1 : exposer la liste
 des comptes HA et leurs usernames externes = fuite d'information.
@@ -40,6 +42,7 @@ class LoginOut(BaseModel):
     display_name: Optional[str] = None
     scope: Optional[str] = None
     mfa_required: bool = False
+    methods: list[str] = []
     passkey_options: Optional[dict] = None
 
 
@@ -49,6 +52,13 @@ class PasskeyLoginPayload(BaseModel):
 
 class RecoveryLoginPayload(BaseModel):
     code: str
+
+
+def _set_mfa_cookie(response: Response, nonce: str) -> None:
+    response.set_cookie(
+        key=MFA_COOKIE_NAME, value=make_mfa_cookie(nonce), max_age=MFA_MAX_AGE,
+        httponly=True, samesite="strict", secure=cookie_secure(), path="/api/auth/login",
+    )
 
 
 def _guard(request: Request, username: str) -> str:
@@ -97,30 +107,81 @@ async def login_with_password(
         # Message générique : ne pas révéler si le username existe ou pas
         raise HTTPException(401, "Identifiants invalides.")
 
-    if passkeys.has_passkeys(db, cred.user_id):
+    if passkeys.has_second_factor(db, cred.user_id):
         scope_value = cred.scope.value if hasattr(cred.scope, "value") else str(cred.scope)
         nonce, options = passkeys.start_login(db, request, cred.user_id, scope_value)
-        response.set_cookie(
-            key=MFA_COOKIE_NAME, value=make_mfa_cookie(nonce), max_age=MFA_MAX_AGE,
-            httponly=True, samesite="strict", secure=cookie_secure(), path="/api/auth/login",
-        )
-        logger.info("Mot de passe OK, passkey demandée ip=%s username=%s", ip, username)
-        return LoginOut(mfa_required=True, passkey_options=options)
+        _set_mfa_cookie(response, nonce)
+        methods = passkeys.second_factor_methods(db, cred.user_id)
+        logger.info("Mot de passe OK, second facteur demandé ip=%s username=%s", ip, username)
+        return LoginOut(mfa_required=True, methods=methods,
+                        passkey_options=options if "passkey" in methods else None)
 
     login_guard.record_success(username)
     logger.info("Login OK ip=%s username=%s", ip, username)
     return _complete(db, response, cred)
 
 
-def _pending_cred(request: Request, db: Session):
+def _pending_cred(request: Request, db: Session, consume: bool = True):
     nonce = read_mfa_cookie(request.cookies.get(MFA_COOKIE_NAME, ""))
-    pending = passkeys.take_login(nonce) if nonce else None
+    pending = (passkeys.take_login(nonce) if consume else passkeys.peek_login(nonce)) if nonce else None
     if pending is None:
         raise HTTPException(401, "Étape expirée : reconnecte-toi avec ton mot de passe.")
     cred = db.query(ExternalCredential).filter(ExternalCredential.user_id == pending.user_id).first()
     if cred is None:
         raise HTTPException(401, "Compte introuvable.")
     return pending, cred
+
+
+class TotpLoginPayload(BaseModel):
+    code: str
+
+
+@router.post("/totp", response_model=LoginOut)
+async def login_with_totp(
+    payload: TotpLoginPayload, request: Request, response: Response, db: Session = Depends(get_db),
+):
+    pending, cred = _pending_cred(request, db, consume=False)
+    ip = _guard(request, cred.username)
+    user = db.get(User, pending.user_id)
+    if not (user and user.totp_enabled and passkeys.verify_totp(user, payload.code)):
+        login_guard.record_failure(cred.username)
+        logger.warning("Code 2FA refusé ip=%s username=%s", ip, cred.username)
+        raise HTTPException(401, "Code incorrect ou expiré.")
+    nonce = read_mfa_cookie(request.cookies.get(MFA_COOKIE_NAME, ""))
+    passkeys.take_login(nonce)
+    login_guard.record_success(cred.username)
+    logger.info("Login OK (code 2FA) ip=%s username=%s", ip, cred.username)
+    return _complete(db, response, cred)
+
+
+@router.post("/passkey/start")
+async def passwordless_start(request: Request, response: Response):
+    ip = client_ip(request)
+    if not login_guard.hit_ip(ip):
+        raise HTTPException(429, "Trop de tentatives. Réessaie dans une minute.")
+    nonce, options = passkeys.start_passwordless(request)
+    _set_mfa_cookie(response, nonce)
+    return {"passkey_options": options}
+
+
+@router.post("/passkey/finish", response_model=LoginOut)
+async def passwordless_finish(
+    payload: PasskeyLoginPayload, request: Request, response: Response, db: Session = Depends(get_db),
+):
+    ip = client_ip(request)
+    nonce = read_mfa_cookie(request.cookies.get(MFA_COOKIE_NAME, ""))
+    try:
+        pk = passkeys.verify_passwordless(db, request, nonce or "", payload.credential)
+    except ValueError as e:
+        logger.warning("Connexion par passkey refusée ip=%s : %s", ip, e)
+        raise HTTPException(401, "Passkey refusée ou inconnue.")
+    cred = db.query(ExternalCredential).filter(ExternalCredential.user_id == pk.user_id).first()
+    if cred is None:
+        raise HTTPException(401, "Compte introuvable.")
+    if login_guard.locked_for(cred.username):
+        raise HTTPException(429, "Compte temporairement verrouillé.")
+    logger.info("Login OK (passkey seule) ip=%s username=%s", ip, cred.username)
+    return _complete(db, response, cred)
 
 
 @router.post("/passkey", response_model=LoginOut)

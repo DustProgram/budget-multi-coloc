@@ -1,8 +1,11 @@
-"""Passkeys (WebAuthn) en second facteur + codes de secours.
+"""Double authentification : passkeys (WebAuthn), code à 6 chiffres (TOTP),
+codes de secours.
 
-Dès qu'un user a au moins une passkey, le login par mot de passe ne pose
-plus la session : il ouvre une étape « second facteur » de 5 min (cookie
-signé + challenge gardé en mémoire, à usage unique).
+Deux façons de se connecter :
+- mot de passe + second facteur (code d'une appli d'authentification, ou passkey) ;
+- passkey seule (Face ID / Touch ID / empreinte), sans mot de passe.
+Dès qu'un user a un second facteur, le mot de passe seul ne pose plus la
+session : il ouvre une étape de 5 min (cookie signé + état en mémoire).
 """
 from __future__ import annotations
 
@@ -27,6 +30,8 @@ from webauthn.helpers.structs import (
     AuthenticatorSelectionCriteria, AuthenticatorTransport, PublicKeyCredentialDescriptor,
     ResidentKeyRequirement, UserVerificationRequirement,
 )
+
+import pyotp
 
 from models import Passkey, RecoveryCode, User
 
@@ -79,6 +84,23 @@ def has_passkeys(db: Session, user_id: int) -> bool:
     return db.query(Passkey).filter(Passkey.user_id == user_id).count() > 0
 
 
+def has_second_factor(db: Session, user_id: int) -> bool:
+    user = db.get(User, user_id)
+    return bool(user and user.totp_enabled) or has_passkeys(db, user_id)
+
+
+def second_factor_methods(db: Session, user_id: int) -> list[str]:
+    user = db.get(User, user_id)
+    methods = []
+    if user and user.totp_enabled:
+        methods.append("totp")
+    if has_passkeys(db, user_id):
+        methods.append("passkey")
+    if remaining_recovery_codes(db, user_id):
+        methods.append("recovery")
+    return methods
+
+
 def _descriptors(db: Session, user_id: int) -> list[PublicKeyCredentialDescriptor]:
     out = []
     for pk in db.query(Passkey).filter(Passkey.user_id == user_id).all():
@@ -103,7 +125,8 @@ def registration_options(db: Session, request: Request, user: User) -> dict:
         user_id=str(user.id).encode(),
         exclude_credentials=_descriptors(db, user.id),
         authenticator_selection=AuthenticatorSelectionCriteria(
-            resident_key=ResidentKeyRequirement.PREFERRED,
+            # Clé « découvrable » : permet la connexion sans saisir d'identifiant
+            resident_key=ResidentKeyRequirement.REQUIRED,
             user_verification=UserVerificationRequirement.PREFERRED,
         ),
     )
@@ -156,6 +179,82 @@ def start_login(db: Session, request: Request, user_id: int, scope: str) -> tupl
 
 def take_login(nonce: str) -> Optional[_Pending]:
     return _pop(f"login:{nonce}")
+
+
+def peek_login(nonce: str) -> Optional[_Pending]:
+    """Sans consommer : une faute de frappe dans le code ne force pas à retaper le mot de passe
+    (le rate-limit et le verrouillage du compte bornent les essais)."""
+    with _lock:
+        p = _pending.get(f"login:{nonce}")
+    return p if p and p.expires >= time.monotonic() else None
+
+
+# ============================================================
+# Connexion par passkey seule (sans mot de passe)
+# ============================================================
+
+def start_passwordless(request: Request) -> tuple[str, dict]:
+    rp_id, _ = rp_config(request)
+    opts = generate_authentication_options(rp_id=rp_id, user_verification=UserVerificationRequirement.REQUIRED)
+    nonce = secrets.token_urlsafe(24)
+    _put(f"pwl:{nonce}", _Pending(0, opts.challenge, time.monotonic() + CHALLENGE_TTL))
+    return nonce, json.loads(options_to_json(opts))
+
+
+def verify_passwordless(db: Session, request: Request, nonce: str, credential: dict) -> Passkey:
+    pending = _pop(f"pwl:{nonce}")
+    if pending is None:
+        raise ValueError("Demande expirée, recommence.")
+    raw_id = credential.get("rawId") or credential.get("id") or ""
+    pk = db.query(Passkey).filter(Passkey.credential_id == raw_id).first()
+    if pk is None:
+        raise ValueError("Passkey inconnue.")
+    rp_id, origin = rp_config(request)
+    try:
+        v = verify_authentication_response(
+            credential=credential, expected_challenge=pending.challenge,
+            expected_rp_id=rp_id, expected_origin=origin,
+            credential_public_key=base64url_to_bytes(pk.public_key),
+            credential_current_sign_count=pk.sign_count,
+            # Sans mot de passe, la biométrie / le code de l'appareil est obligatoire
+            require_user_verification=True,
+        )
+    except Exception as e:
+        raise ValueError(f"Passkey refusée : {e}")
+    pk.sign_count = v.new_sign_count
+    pk.last_used_at = datetime.utcnow()
+    return pk
+
+
+# ============================================================
+# Code à 6 chiffres (appli d'authentification)
+# ============================================================
+
+def totp_setup(db: Session, user: User, issuer: str) -> tuple[str, str]:
+    """Nouveau secret (pas encore actif). Retourne (secret, URI otpauth)."""
+    if user.totp_enabled:
+        raise ValueError("Déjà activée : désactive-la d'abord pour changer d'appareil.")
+    user.totp_secret = pyotp.random_base32()
+    db.flush()
+    return user.totp_secret, pyotp.TOTP(user.totp_secret).provisioning_uri(
+        name=user.ha_username, issuer_name=issuer,
+    )
+
+
+def verify_totp(user: User, code: str) -> bool:
+    """Accepte le code courant ±30 s, une seule fois (anti-rejeu)."""
+    if not user.totp_secret:
+        return False
+    code = "".join(c for c in (code or "") if c.isdigit())
+    if len(code) != 6:
+        return False
+    totp = pyotp.TOTP(user.totp_secret)
+    now_step = int(time.time()) // 30
+    for step in (now_step - 1, now_step, now_step + 1):
+        if secrets.compare_digest(totp.at(step * 30), code) and step > (user.totp_last_step or 0):
+            user.totp_last_step = step
+            return True
+    return False
 
 
 def verify_login(db: Session, request: Request, pending: _Pending, credential: dict) -> Passkey:
@@ -219,6 +318,9 @@ def remaining_recovery_codes(db: Session, user_id: int) -> int:
 
 
 def disable_second_factor(db: Session, user_id: int) -> None:
-    """Pour l'admin (CLI) quand un user a perdu passkeys et codes."""
+    """Pour l'admin (CLI) quand un user a perdu passkeys, appli et codes."""
     db.query(Passkey).filter(Passkey.user_id == user_id).delete()
     db.query(RecoveryCode).filter(RecoveryCode.user_id == user_id).delete()
+    user = db.get(User, user_id)
+    if user:
+        user.totp_enabled, user.totp_secret, user.totp_last_step = False, None, 0
