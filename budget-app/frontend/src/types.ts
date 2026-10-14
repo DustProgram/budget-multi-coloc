@@ -227,6 +227,8 @@ export interface DashboardData {
   total_initial_balance: string;
   total_final_balance: string;
   available_for_purchases: string;
+  envelope_perso?: string;
+  envelope_common_share?: string;
   accounts: DashboardAccount[];
 }
 
@@ -302,6 +304,7 @@ export interface Me {
   external_scope: 'coloc' | 'full' | null;
   pro_enabled: boolean;
   session_scope: 'coloc' | 'full';
+  auth_mode?: 'ha' | 'standalone';
 }
 
 // ============================================================

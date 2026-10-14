@@ -2,10 +2,11 @@
 from fastapi import APIRouter, Response
 
 from services.external_auth import COOKIE_NAME
+from services.security import cookie_secure
 
 router = APIRouter()
 
 
 @router.post("/", status_code=204)
 async def logout(response: Response):
-    response.delete_cookie(COOKIE_NAME, path="/")
+    response.delete_cookie(COOKIE_NAME, path="/", httponly=True, secure=cookie_secure())

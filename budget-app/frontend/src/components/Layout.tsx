@@ -7,6 +7,7 @@ import {
   ArrowLeftRight, PiggyBank, ShoppingBag, Calculator, BarChart3,
   ListChecks, Users, ChevronLeft, ChevronRight, Menu, X, Briefcase,
   Settings as SettingsIcon, Sparkles, ListOrdered, Camera, FileSpreadsheet,
+  Inbox as InboxIcon,
 } from 'lucide-react';
 import { TweaksPanel } from './TweaksPanel';
 import { OfflineBadge } from './OfflineBadge';
@@ -35,6 +36,7 @@ const NAV: NavItem[] = [
   { to: 'transfers', label: 'Virements', icon: ArrowLeftRight, section: 'Mouvements', colocAllowed: false },
   { to: 'savings', label: 'Épargne', icon: PiggyBank, section: 'Mouvements', colocAllowed: false },
   { to: 'purchases', label: 'Achats', icon: ShoppingBag, section: 'Mouvements', colocAllowed: false },
+  { to: 'inbox', label: 'À valider', icon: InboxIcon, section: 'Mouvements', colocAllowed: false },
   { to: 'coloc', label: 'Récap coloc', icon: Users, section: 'Coloc', colocAllowed: true },
   { to: 'shopping', label: 'Courses', icon: ListChecks, section: 'Coloc', colocAllowed: true },
   { to: 'simulator', label: 'Simulateur', icon: Calculator, section: 'Outils', colocAllowed: false },
@@ -60,6 +62,12 @@ export function Layout() {
     queryKey: ['version'],
     queryFn: async () => (await api.get<{ version: string }>('/health/version')).data,
     staleTime: 60 * 60_000,
+  });
+  const inboxCount = useQuery({
+    queryKey: ['bank-inbox-count'],
+    queryFn: async () => (await api.get<{ count: number }>('/bank/inbox/count')).data.count,
+    enabled: me.data?.session_scope === 'full',
+    refetchInterval: 5 * 60_000,
   });
   const proEnabled = me.data?.pro_enabled ?? false;
   const sessionScope = me.data?.session_scope ?? 'full';
@@ -91,7 +99,7 @@ export function Layout() {
               <div className="brand-name">
                 Budget Coloc
                 <small>
-                  {isColocSession ? 'Mode coloc' : `HA · v${versionQ.data?.version ?? '...'}`}
+                  {isColocSession ? 'Mode coloc' : `${me.data?.auth_mode === 'standalone' ? '' : 'HA · '}v${versionQ.data?.version ?? '...'}`}
                 </small>
               </div>
               <button className="collapse-btn" onClick={() => setCollapsed(true)} aria-label="Réduire">
@@ -135,6 +143,11 @@ export function Layout() {
                   >
                     <Icon size={16} />
                     {!collapsed && <span className="lbl">{item.label}</span>}
+                    {item.to === 'inbox' && (inboxCount.data ?? 0) > 0 && (
+                      <span className="pill terra" style={{ marginLeft: 'auto', padding: '1px 7px' }}>
+                        {inboxCount.data}
+                      </span>
+                    )}
                   </NavLink>
                 );
               })}

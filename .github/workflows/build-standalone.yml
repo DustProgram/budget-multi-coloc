@@ -1,0 +1,52 @@
+name: Build standalone image (VPS)
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'budget-app/**'
+      - '.github/workflows/build-standalone.yml'
+  pull_request:
+    branches: [main]
+    paths:
+      - 'budget-app/**'
+      - '.github/workflows/build-standalone.yml'
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Login to GHCR
+        if: github.event_name != 'pull_request'
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Version + owner
+        id: meta
+        run: |
+          echo "version=$(grep '^version:' budget-app/config.yaml | awk '{print $2}' | tr -d '"')" >> $GITHUB_OUTPUT
+          echo "owner=$(echo '${{ github.repository_owner }}' | tr A-Z a-z)" >> $GITHUB_OUTPUT
+
+      # Hostinger KVM = x86_64 → amd64 seulement
+      - uses: docker/build-push-action@v6
+        with:
+          context: ./budget-app
+          file: ./budget-app/Dockerfile.standalone
+          platforms: linux/amd64
+          push: ${{ github.event_name != 'pull_request' }}
+          tags: |
+            ghcr.io/${{ steps.meta.outputs.owner }}/budget-multi-coloc-standalone:${{ steps.meta.outputs.version }}
+            ghcr.io/${{ steps.meta.outputs.owner }}/budget-multi-coloc-standalone:latest
+          cache-from: type=gha,scope=standalone
+          cache-to: type=gha,mode=max,scope=standalone

@@ -87,7 +87,7 @@ def attach_sqlalchemy_listeners() -> None:
     from sqlalchemy import event
     from models import (
         Income, Charge, ChargeSplit, RecurringTransfer, OneTimeTransfer,
-        AutoSaving, Purchase, Account, AccountMember,
+        AutoSaving, Purchase, Account, AccountMember, Envelope,
     )
 
     def _on_mutation(_mapper, _connection, _target):
@@ -95,7 +95,7 @@ def attach_sqlalchemy_listeners() -> None:
 
     for model in (
         Income, Charge, ChargeSplit, RecurringTransfer, OneTimeTransfer,
-        AutoSaving, Purchase, Account, AccountMember,
+        AutoSaving, Purchase, Account, AccountMember, Envelope,
     ):
         event.listen(model, "after_insert", _on_mutation)
         event.listen(model, "after_update", _on_mutation)

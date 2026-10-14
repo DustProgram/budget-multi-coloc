@@ -1,13 +1,18 @@
 # 🤖 Guide pour Claude Code
 
-Add-on Home Assistant **Budget Multi-Coloc** — gestion budgétaire perso + colocation.
-Tout le code de prod vit dans `budget-app/`. Pas de cloud — données sur clé USB LUKS (option) ou `/data` HA standard.
+**Budget Multi-Coloc** — gestion budgétaire perso + colocation.
+Tout le code de prod vit dans `budget-app/`. Depuis 0.12.0, cible principale = **VPS Hostinger KVM 1**
+en mode `AUTH_MODE=standalone` (cf `deploy/README.md`). L'add-on Home Assistant reste fonctionnel mais est mis de côté.
 
 ---
 
-## ⚡ État actuel : 0.11.0 (mai 2026)
+## ⚡ État actuel : 0.12.0 (octobre 2026)
 
-**En production** sur la HA Green de l'utilisateur. Image publiée via GHA Docker sur `ghcr.io/dustprogram/budget-multi-coloc-{arch}`. Tests : **49/49 pytest verts**. Frontend build : OK. Branche actuelle : `main`. Pas de travail en cours.
+Passage en **standalone sur VPS** : `deploy/` (docker-compose app + Caddy HTTPS), `budget-app/Dockerfile.standalone`,
+image `ghcr.io/dustprogram/budget-multi-coloc-standalone` (workflow `build-standalone.yml`).
+Image HA toujours publiée sur `ghcr.io/dustprogram/budget-multi-coloc-{arch}`. Tests : **105/105 pytest verts**. `pip-audit` en CI.
+Rapprochement relevés ↔ déclarations + page « À valider » + API agent Hermes/n8n livrés dans la même version → `docs/AUTOMATISATIONS.md`.
+Reste : synchro bancaire directe (agrégateur DSP2).
 
 ### Comment reprendre
 
@@ -34,6 +39,7 @@ Tout le code de prod vit dans `budget-app/`. Pas de cloud — données sur clé 
 - ✅ **0.8.x** : LLM pluggable 14 providers (anthropic/openai/gemini/mistral/groq/openrouter/deepseek/together/perplexity/fireworks/cerebras/ollama/lmstudio/custom), rate-limit RPM/TPM/RPD, UI Settings LLM in-app, version dynamique, suppression compte cascade/reassign, modal/inputs UX
 - ✅ **0.9.x** : Modèle abondement V2 (charges joint = vraies dépenses + events virtuels `expected_in` qui équilibrent), portée calendrier 1-3 ans, transitions revenu/charge (`/transition` endpoints), `created_at` comme `valid_from` implicite, toggle "exclure ma part des charges joint" du budget perso, virements perso→joint déduits de la marge
 - ✅ **0.10.0** : Cache mémoire 30s sur `compute_monthly_budget` + listener SQLAlchemy auto-invalidation, yearly batch pré-warming, endpoint `/dashboard/balance_at`
+- ✅ **0.12.0** : Mode standalone (sans HA) pour VPS : comptes locaux + admin UI, fixes sécu #56 (rate-limit, lockout, anti-spoofing, headers, cookies, limite payload), docker-compose + Caddy, backups quotidiens. Relevés bancaires (CSV/OFX/PDF) + rapprochement automatique + règles apprises + page « À valider » + abondements coloc réels + API agent (Hermes, n8n) + liaison messageries par code
 - ✅ **0.11.0** : Cleanup types legacy coloc frontend, backfill `_backfill_created_at_if_null` retiré, widget alerte retard abondement Dashboard, export CSV/PDF par mois, budgets catégorie avec plafonds mensuels
 
 ---
@@ -47,7 +53,8 @@ Tout le code de prod vit dans `budget-app/`. Pas de cloud — données sur clé 
 - Approche : créer endpoint `/api/intents/{intent_name}` qui mappe aux mêmes tools que `ai_tools.py`, déclarer un fichier d'intents HA dans `config.yaml`.
 
 ### #56 — Fixes sécurité avant exposition Internet
-- Statut : **pending**, audit fait (cf `project_security_audit_pending.md`), fixes pas implémentés.
+- Statut : **✅ livré en 0.12.0** (actif en `AUTH_MODE=standalone`, cf `services/security.py`). Reste : table `LoginLog` (idée #5), révocation serveur des sessions.
+- Historique :
 - L'utilisateur a décidé d'attendre. **Avant toute exposition hors LAN**, faire d'urgence :
   1. **Rate-limit login externe** sur `services/external_auth.py` (5 essais/min/IP)
   2. **Lockout après N échecs** (15min après 10 échecs)
@@ -111,6 +118,7 @@ Tout le code de prod vit dans `budget-app/`. Pas de cloud — données sur clé 
 
 #### Services IA (mémoire détaillée : `project_llm_pluggable.md`)
 - `services/llm_client.py` : factory `get_llm_client()` + 3 adapters (Anthropic, OpenAI-compat, Gemini), 14 providers en presets
+- Mistral : appels espacés ≥1,1 s (offre gratuite ≈ 1 req/s) + 5 relances SDK sur 429, `_mistral_compat` (ids d'outil 9 car., `name` sur les messages tool, assistant inséré entre tool et user). `POST /api/settings/llm/test` (admin) = vrai appel avec les outils, renvoie l'erreur exacte ; `env_overrides` signale les `LLM_*` du .env qui priment sur l'UI
 - `services/ai_chat.py` + `services/ai_tools.py` : chat function calling, 11 outils
 - `services/ai_import.py` : Claude Vision (tickets/factures/relevés)
 - `services/bulk_import.py` : Excel/CSV multi-sheets, **100% local**
@@ -147,13 +155,49 @@ Tout le code de prod vit dans `budget-app/`. Pas de cloud — données sur clé 
   - `Settings.tsx` : `<CategoryBudgetsCard>` (0.11.0) + `<LLMSettingsCard>` (admin only)
 - Hook `lib/useAutoEdit.ts` : détecte `?edit=N` et auto-ouvre modal
 
+### Relevés & rapprochement (0.12.0)
+- `BankTransaction` (dédup par `fingerprint` unique par compte), `MatchingRule` (tokens du libellé normalisé ⊂ libellé + fourchette montant), `ChannelLink`, `User.notify_channel`
+- Import en masse : `account_id` optionnel sur `/api/bank/import` et `/api/agent/statements` → compte reconnu par `Account.statement_ref` (n° de compte à 11 car. tiré de l'IBAN FR à clé valide, `<ACCTID>` OFX, « compte » + 11 chiffres en CSV), appris au premier import avec compte choisi (`services/account_detect.py`). Inconnu → 422 `code: account_unknown`
+- Ordre : achat existant ±4j → règle → déclarations du mois (1 seul candidat = auto, sinon `to_review`)
+- `joint_contributions` : si le relevé du joint est importé pour le mois, `actual` = crédits rapprochés à un membre (`from_bank=True`)
+- `/api/agent/*` : auth `AGENT_API_TOKEN` (hors middleware session), identité par `channel`+`handle` liés via code (in-memory 15 min) ou `username` (n8n)
+- Le SW cache `/api` GET en **NetworkFirst** (était StaleWhileRevalidate → listes pas à jour après mutation)
+
+### Relevés PDF & démarrage rapide (0.12.0)
+- `services/pdf_statements.py` : lecture **locale** des PDF à colonnes Débit/Crédit (BRED, BoursoBank, Sumeria : montants `1234.56`, dates `jj/mm`, colonne Solde courant ignorée, soldes « confirmés » hors tableau) via pdfminer (position X des montants vs en-têtes), arrêt à « Nouveau solde » / « poste annexe », **vérifiée** par ancien solde + mouvements = nouveau solde. IA seulement si non vérifié (`source = "pdf-ia"`)
+- `services/onboarding.py` : groupes par commerçant (libellé sans CARTE/PRLV/VIR…) → revenus réguliers (≥2 mois), charges (prélèvements/virements programmés ≥2 mois ; carte seulement si abonnement connu ou ≥10 €, 1×/mois), crédits d'un membre sur compte joint (prénom dans le libellé) → abondement, virements vers soi (nom complet) → ignorer, reste → achats catégorisés (mots-clés puis 1 appel IA optionnel)
+- `GET /api/bank/onboarding`, `POST /api/bank/onboarding/apply` ; UI « Démarrage rapide » dans `Inbox.tsx` (≥5 opérations à trier)
+- ⚠️ Ne jamais committer de vrais relevés : tests sur PDF générés (reportlab) au même format
+
+### Enveloppes vie quotidienne (0.12.0) — philosophie de l'app
+- **On ne détaille pas les petites dépenses** : l'objectif est « combien il reste à la fin » et « puis-je me permettre cet achat ».
+- `Envelope` : perso (`user_id`, `account_id` nul) ou commune (`account_id` = compte joint, partagée à parts égales, ajoutée à l'abondement attendu de chaque membre). `monthly_amount` + `big_purchase_threshold` (seuil choisi par l'user, défaut 150 €)
+- Import : débit sans déclaration correspondante et < seuil → `match_kind = "daily"` sans question ; ≥ seuil → « à valider » (achat exceptionnel ou quotidien ?). Sans enveloppe configurée, rien n'est auto-classé quotidien
+- `MonthlyBudget.available_for_purchases` = **marge projets** = revenus − charges − épargne − achats − enveloppe perso − part de l'enveloppe commune (`envelope_perso`, `envelope_common_share`)
+- `GET /api/envelopes/` (statut du mois : dépensé, reste, €/jour, suggestion = moyenne des petites dépenses importées), `PUT /api/envelopes/perso`, `PUT /api/envelopes/account/{id}` ; UI `components/EnvelopesCard.tsx` sur le Dashboard
+- Démarrage rapide : toutes les petites dépenses d'un compte = **un seul groupe « daily »**
+
+### Second facteur & sessions (0.12.0)
+- Deux façons de se connecter : **mot de passe + second facteur** (code TOTP d'une appli, `pyotp`, ou passkey, ou code de secours) **ou passkey seule** (WebAuthn discoverable, `user_verification=required`, `/api/auth/login/passkey/start` + `/finish`)
+- `/api/auth/login/password` renvoie `mfa_required` + `methods` (`totp`/`passkey`/`recovery`), puis `/login/totp`, `/login/passkey` ou `/login/recovery`. État intermédiaire : cookie `budget_mfa` signé (path `/api/auth/login`, 5 min) + état en mémoire (`services/passkeys.py`). Un code TOTP faux ne consomme pas l'étape (rate-limit + lockout bornent) ; anti-rejeu via `User.totp_last_step`
+- TOTP : `User.totp_secret/totp_enabled/totp_last_step`, `POST /api/passkeys/totp/setup` (QR SVG via `segno`), `/totp/enable`, `/totp/disable` (code requis)
+- RP ID = `WEBAUTHN_RP_ID` ou `DOMAIN` (jamais le Host reçu) ; en dev = host de la requête
+- `User.session_version` dans le cookie (`sv`) : bump = révocation (mdp changé, 1re passkey, suppression passkey, `logout-all`, reset admin) ; la session courante est réémise
+- CLI : `create_user.py <u> --reset-2fa`
+
+### Mode standalone (0.12.0)
+- `AUTH_MODE=standalone` : header `X-Remote-User-Id` ignoré, tokens legacy (`?token=` et Bearer) refusés, Swagger off, headers sécu + HSTS, cookies Secure/Strict
+- Users locaux : `ha_user_id = "local:<username>"` + `ExternalCredential` (`services/local_users.py`). 1er admin via `ADMIN_USERNAME`/`ADMIN_PASSWORD` si base vide
+- Admin : `GET/POST /api/users/`, `PATCH /api/users/{id}` ; CLI `scripts/create_user.py`
+- Une session `coloc` ne peut ni s'auto-promouvoir `full` ni générer de token legacy
+
 ### Sécurité (état actuel, cf `project_security_audit_pending.md`)
 - ✅ Auth via middleware HA Ingress (`X-Remote-User-Id`)
 - ✅ Port externe `8765` désactivé par défaut, auth username/password + bcrypt + cookies HMAC
 - ✅ SQL Injection → SQLAlchemy ORM (sain)
 - ✅ XSS → React + react-markdown sanitize (sain)
 - ✅ CORS → DEV_MODE only (sain)
-- ⚠️ **PAS de rate-limit login externe** — fix requis si exposition Internet (cf #56)
+- ✅ Rate-limit login 5/min/IP + lockout 15 min après 10 échecs (in-memory, 1 worker)
 
 ---
 
@@ -229,7 +273,7 @@ DEV_MODE=true LLM_API_KEY=... DATABASE_URL="sqlite:///./dev.db?check_same_thread
 # Dev frontend
 cd budget-app/frontend && npm run dev
 
-# Tests backend (49 actuellement)
+# Tests backend (105 actuellement)
 cd budget-app/backend && DEV_MODE=true DATABASE_URL="sqlite:///./test.db" .venv/bin/pytest tests/ -q
 
 # Build frontend

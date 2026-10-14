@@ -1,0 +1,53 @@
+# Stack VPS : app + Caddy (HTTPS Let's Encrypt automatique).
+# Usage : cp .env.example .env && nano .env && docker compose up -d --build
+
+services:
+  app:
+    image: ghcr.io/dustprogram/budget-multi-coloc-standalone:latest
+    build:
+      context: ../budget-app
+      dockerfile: Dockerfile.standalone
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      AUTH_MODE: standalone
+    volumes:
+      - budget-data:/data
+      - budget-backups:/backup
+    # Pas de "ports:" — l'app n'est joignable que par Caddy
+    expose:
+      - "8000"
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    mem_limit: 768m
+    logging:
+      driver: json-file
+      options: { max-size: "10m", max-file: "3" }
+
+  caddy:
+    image: caddy:2.8-alpine
+    restart: unless-stopped
+    depends_on:
+      - app
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    environment:
+      DOMAIN: ${DOMAIN:?DOMAIN manquant dans .env}
+      ACME_EMAIL: ${ACME_EMAIL:?ACME_EMAIL manquant dans .env}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    logging:
+      driver: json-file
+      options: { max-size: "10m", max-file: "3" }
+
+volumes:
+  budget-data:
+  budget-backups:
+  caddy-data:
+  caddy-config:

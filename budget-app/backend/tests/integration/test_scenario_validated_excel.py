@@ -25,7 +25,7 @@ Résultats attendus :
 - BRED Livret A fin : 3500 + 80 = 3580€
 - Bourso fin : 500 + 350 + 250 - 15 - 30 - 160 = 895€
 """
-from datetime import date
+from datetime import date, datetime
 from decimal import Decimal
 
 import pytest
@@ -135,6 +135,11 @@ def setup_scenario(db):
                  category="Loisirs", payment_method=PaymentMethod.CB, account_id=bourso.id),
     ])
 
+    # created_at sert de valid_from implicite : on antidate pour que le
+    # scénario reste valide quelle que soit la date d'exécution des tests.
+    for obj in list(db.new) + list(db.identity_map.values()):
+        if hasattr(obj, "created_at"):
+            obj.created_at = datetime(2026, 1, 1)
     db.commit()
     return user, [bred_courant, bred_livret, bourso]
 

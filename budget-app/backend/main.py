@@ -27,11 +27,20 @@ from api import (
     settings_llm as settings_llm_api,
     export as export_api,
     category_budgets as category_budgets_api,
+    bank as bank_api,
+    channels as channels_api,
+    agent as agent_api,
+    passkeys as passkeys_api,
+    envelopes as envelopes_api,
 )
 from models.base import init_db
 from services.backup import perform_monthly_backup
 from services.auth import HAUserMiddleware
 from services.budget_cache import attach_sqlalchemy_listeners
+from services.local_users import ensure_bootstrap_admin
+from services.security import (
+    MaxBodySizeMiddleware, SecurityHeadersMiddleware, is_standalone,
+)
 
 logging.basicConfig(
     level=os.environ.get("LOG_LEVEL", "info").upper(),
@@ -48,6 +57,8 @@ async def lifespan(app: FastAPI):
     logger.info("🚀 Démarrage Budget Multi-Coloc")
     init_db()
     attach_sqlalchemy_listeners()
+    if is_standalone():
+        ensure_bootstrap_admin()
 
     # Planifier le backup mensuel (1er de chaque mois à 03h00)
     if os.environ.get("BACKUP_ENABLED", "true").lower() == "true":
@@ -68,12 +79,16 @@ async def lifespan(app: FastAPI):
     logger.info("👋 Arrêt propre")
 
 
+# Swagger public = cartographie de l'API offerte : coupé en standalone sauf opt-in
+_docs_enabled = not is_standalone() or os.environ.get("ENABLE_API_DOCS") == "true"
+
 app = FastAPI(
     title="Budget Multi-Coloc",
-    description="Gestionnaire de budget et colocation pour Home Assistant",
+    description="Gestionnaire de budget perso et colocation",
     version="0.1.0",
     lifespan=lifespan,
-    docs_url="/api/docs",
+    docs_url="/api/docs" if _docs_enabled else None,
+    openapi_url="/api/openapi.json" if _docs_enabled else None,
     redoc_url=None,
 )
 
@@ -89,6 +104,9 @@ if os.environ.get("DEV_MODE") == "true":
 
 # Middleware d'authentification via headers Ingress HA
 app.add_middleware(HAUserMiddleware)
+# Ajoutés après = exécutés avant l'auth (Starlette empile en LIFO)
+app.add_middleware(MaxBodySizeMiddleware)
+app.add_middleware(SecurityHeadersMiddleware)
 
 # ===== Routes API =====
 app.include_router(health.router, prefix="/api/health", tags=["health"])
@@ -118,6 +136,11 @@ app.include_router(bulk_import_api.router, prefix="/api/bulk-import", tags=["bul
 app.include_router(settings_llm_api.router, prefix="/api/settings", tags=["settings"])
 app.include_router(export_api.router, prefix="/api/export", tags=["export"])
 app.include_router(category_budgets_api.router, prefix="/api/category-budgets", tags=["category-budgets"])
+app.include_router(bank_api.router, prefix="/api/bank", tags=["bank"])
+app.include_router(channels_api.router, prefix="/api/channels", tags=["channels"])
+app.include_router(agent_api.router, prefix="/api/agent", tags=["agent"])
+app.include_router(passkeys_api.router, prefix="/api/passkeys", tags=["passkeys"])
+app.include_router(envelopes_api.router, prefix="/api/envelopes", tags=["envelopes"])
 
 # ===== Frontend statique (PWA) =====
 static_dir = Path(os.environ.get("STATIC_DIR", "/app/static"))
@@ -146,6 +169,6 @@ if static_dir.exists():
         # Sinon : index.html avec réécriture du base path
         ingress_path = request.headers.get("X-Ingress-Path", "").rstrip("/")
         index_html = (static_dir / "index.html").read_text(encoding="utf-8")
-        if ingress_path:
-            index_html = index_html.replace('="./', f'="{ingress_path}/')
+        # Sans ingress → chemins absolus, sinon /comptes/5 chercherait /comptes/assets/…
+        index_html = index_html.replace('="./', f'="{ingress_path}/')
         return HTMLResponse(index_html)

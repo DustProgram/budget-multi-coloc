@@ -30,6 +30,8 @@ def _serialize(b: MonthlyBudget) -> dict:
         "total_initial_balance": b.total_initial_balance,
         "total_final_balance": b.total_final_balance,
         "available_for_purchases": b.available_for_purchases,
+        "envelope_perso": b.envelope_perso,
+        "envelope_common_share": b.envelope_common_share,
         "accounts": [
             {
                 "account_id": a.account_id,

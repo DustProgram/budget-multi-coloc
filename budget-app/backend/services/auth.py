@@ -26,6 +26,7 @@ from models import ExternalScope, User
 from services.external_auth import (
     COOKIE_NAME, read_session_cookie, is_path_allowed_for_scope,
 )
+from services.security import is_standalone
 
 logger = logging.getLogger(__name__)
 
@@ -35,6 +36,7 @@ PUBLIC_PATHS_PREFIX = (
     "/api/openapi.json",
     "/api/auth/login",
     "/api/auth/logout",
+    "/api/agent",  # auth par AGENT_API_TOKEN dans le router (api/agent.py)
 )
 PUBLIC_PATHS = set(PUBLIC_PATHS_PREFIX)
 
@@ -68,8 +70,9 @@ class HAUserMiddleware(BaseHTTPMiddleware):
             request.state.scope = ExternalScope.FULL.value
             return await call_next(request)
 
-        # 1) Ingress HA
-        ha_user_id = request.headers.get("X-Remote-User-Id")
+        # 1) Ingress HA — ignoré en standalone : sans supervisor devant,
+        # le header est forgeable par n'importe quel client.
+        ha_user_id = None if is_standalone() else request.headers.get("X-Remote-User-Id")
         if ha_user_id:
             ha_username = request.headers.get("X-Remote-User-Name", "Unknown")
             display = request.headers.get("X-Remote-User-Display-Name") or ha_username
@@ -83,6 +86,8 @@ class HAUserMiddleware(BaseHTTPMiddleware):
         session = read_session_cookie(cookie) if cookie else None
         if session:
             user = self._find_user(session.get("user_id"))
+            if user and int(session.get("sv", 0)) != (user.session_version or 0):
+                user = None  # session révoquée (mot de passe changé, « déconnecter partout »…)
             scope = session.get("scope", ExternalScope.FULL.value)
             if user and is_path_allowed_for_scope(path, scope):
                 request.state.user = user
@@ -107,12 +112,16 @@ class HAUserMiddleware(BaseHTTPMiddleware):
             status_code=401,
             content={
                 "detail": "Authentification requise.",
-                "hint": "Connecte-toi via Home Assistant (ingress) ou via /api/auth/login/password.",
+                "hint": "Connecte-toi via /api/auth/login/password.",
             },
         )
 
     @staticmethod
     def _extract_legacy_token(request: Request) -> Optional[str]:
+        if is_standalone():
+            # Accès full permanent qui contournerait la passkey et la révocation
+            # de sessions : remplacé par /api/agent pour les automatisations.
+            return None
         auth = request.headers.get("Authorization", "")
         if auth.lower().startswith("bearer "):
             return auth[7:].strip() or None

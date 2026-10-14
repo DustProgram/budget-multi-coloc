@@ -2,8 +2,9 @@ import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   KeyRound, RefreshCw, Trash2, AlertTriangle, Bell, BellRing,
-  Briefcase, Home, Plus, User as UserIcon, Lock, Shield,
+  Briefcase, Home, Plus, User as UserIcon, Lock, Shield, Fingerprint, LogOut,
 } from 'lucide-react';
+import { startRegistration, type PublicKeyCredentialCreationOptionsJSON } from '@simplewebauthn/browser';
 import { api } from '../lib/api';
 import {
   Button, Card, ErrorBox, Field, Input, Loader, PageHeader, Select,
@@ -20,6 +21,7 @@ interface Me {
   external_username: string | null;
   external_scope: 'coloc' | 'full' | null;
   pro_enabled: boolean;
+  auth_mode?: 'ha' | 'standalone';
 }
 
 interface NotifierStatus { ha_available: boolean; }
@@ -53,9 +55,11 @@ export function Settings() {
     queryKey: ['me'],
     queryFn: async () => (await api.get<Me>('/users/me')).data,
   });
+  const standalone = me.data?.auth_mode === 'standalone';
   const notifier = useQuery({
     queryKey: ['notifier-status'],
     queryFn: async () => (await api.get<NotifierStatus>('/notifier/status')).data,
+    enabled: me.isSuccess && !standalone,
   });
 
   return (
@@ -63,7 +67,9 @@ export function Settings() {
       <PageHeader
         eyebrow="Réglages"
         title="Mon compte, mon foyer & accès"
-        subtitle="Profil HA, foyer coloc, compte externe, mode pro, notifications."
+        subtitle={standalone
+          ? 'Profil, foyer coloc, mot de passe, mode pro, utilisateurs.'
+          : 'Profil HA, foyer coloc, compte externe, mode pro, notifications.'}
       />
 
       {me.isLoading && <Loader />}
@@ -73,12 +79,16 @@ export function Settings() {
         <div className="grid" style={{
           gap: 16, gridTemplateColumns: 'repeat(auto-fit, minmax(380px, 1fr))',
         }}>
-          <ProfileCard me={me.data} />
+          <ProfileCard me={me.data} standalone={standalone} />
           <HouseholdCard />
-          <ExternalAccountCard me={me.data} onChanged={() => qc.invalidateQueries({ queryKey: ['me'] })} />
+          <ExternalAccountCard me={me.data} standalone={standalone}
+            onChanged={() => qc.invalidateQueries({ queryKey: ['me'] })} />
+          <SecurityCard />
+          <ChannelsCard />
           <ProCard me={me.data} onChanged={() => qc.invalidateQueries({ queryKey: ['me'] })} />
-          <NotifCard available={notifier.data?.ha_available ?? false} />
+          {!standalone && <NotifCard available={notifier.data?.ha_available ?? false} />}
           <CategoryBudgetsCard />
+          {me.data.is_admin && standalone && <UsersAdminCard meId={me.data.user_id} />}
           {me.data.is_admin && <LLMSettingsCard />}
         </div>
       )}
@@ -90,7 +100,7 @@ export function Settings() {
 // Profil
 // ============================================================
 
-function ProfileCard({ me }: { me: Me }) {
+function ProfileCard({ me, standalone }: { me: Me; standalone: boolean }) {
   return (
     <Card>
       <p className="eyebrow">Profil</p>
@@ -98,14 +108,15 @@ function ProfileCard({ me }: { me: Me }) {
         {me.display_name || me.ha_username}
       </h3>
       <div className="small muted">
-        ha_username · <code style={{
+        {standalone ? 'identifiant' : 'ha_username'} · <code style={{
           background: 'var(--bg-sunken)', padding: '2px 6px', borderRadius: 6,
         }}>{me.ha_username}</code>
       </div>
       {me.is_admin && <div className="pill terra" style={{ marginTop: 10 }}>Administrateur</div>}
       <p className="small muted" style={{ marginTop: 14 }}>
-        Ton identité provient de Home Assistant. Pour changer ton nom d'affichage,
-        modifie-le dans HA → Paramètres → Personnes.
+        {standalone
+          ? "Pour changer ton nom d'affichage, demande à l'administrateur (Réglages → Utilisateurs)."
+          : "Ton identité provient de Home Assistant. Pour changer ton nom d'affichage, modifie-le dans HA → Paramètres → Personnes."}
       </p>
     </Card>
   );
@@ -291,8 +302,8 @@ function HouseholdCard() {
             <Plus size={14} /> Créer mon foyer
           </Button>
           <p className="small muted" style={{ marginTop: 10 }}>
-            Tu pourras ajouter tes coloc une fois qu'ils auront ouvert l'app
-            au moins une fois via Home Assistant.
+            Tu pourras ajouter tes coloc une fois qu'ils auront un compte
+            et se seront connectés au moins une fois.
           </p>
         </>
       )}
@@ -306,7 +317,9 @@ function HouseholdCard() {
 // Compte externe
 // ============================================================
 
-function ExternalAccountCard({ me, onChanged }: { me: Me; onChanged: () => void }) {
+function ExternalAccountCard({ me, standalone, onChanged }: {
+  me: Me; standalone: boolean; onChanged: () => void;
+}) {
   const [username, setUsername] = useState(me.external_username ?? '');
   const [password, setPassword] = useState('');
   const [scope, setScope] = useState<'coloc' | 'full'>(me.external_scope ?? 'full');
@@ -337,17 +350,20 @@ function ExternalAccountCard({ me, onChanged }: { me: Me; onChanged: () => void 
     <Card>
       <div className="row gap-2" style={{ alignItems: 'center', marginBottom: 4 }}>
         <KeyRound size={16} style={{ color: 'var(--ink-2)' }} />
-        <p className="eyebrow" style={{ margin: 0 }}>Compte externe — port 8765</p>
+        <p className="eyebrow" style={{ margin: 0 }}>
+          {standalone ? 'Identifiants de connexion' : 'Compte externe — port 8765'}
+        </p>
       </div>
       <h3 style={{ fontFamily: 'var(--display)', fontSize: 22, margin: '4px 0 8px' }}>
-        Accès sans Home Assistant
+        {standalone ? 'Changer mon mot de passe' : 'Accès sans Home Assistant'}
       </h3>
       <p className="small muted">
-        Crée un username + mot de passe pour te connecter directement sur
-        le port 8765 (Tailscale, LAN ou reverse proxy). Choisis le scope :
+        {standalone
+          ? 'Utilise un mot de passe long et unique (10 caractères minimum, idéalement un gestionnaire de mots de passe).'
+          : 'Crée un username + mot de passe pour te connecter directement sur le port 8765 (Tailscale, LAN ou reverse proxy). Choisis le scope :'}
       </p>
 
-      <div className="row gap-2" style={{
+      {!standalone && <div className="row gap-2" style={{
         marginTop: 12, padding: '10px 12px', borderRadius: 10,
         background: 'var(--amber-bg, oklch(0.94 0.04 80))',
         border: '1px solid var(--amber, oklch(0.78 0.12 80))',
@@ -359,7 +375,7 @@ function ExternalAccountCard({ me, onChanged }: { me: Me; onChanged: () => void 
           limité (courses + chat + récap). <strong>Scope full</strong> =
           accès complet à toute l'app.
         </span>
-      </div>
+      </div>}
 
       <form
         onSubmit={(e) => { e.preventDefault(); setError(null); save.mutate(); }}
@@ -375,16 +391,19 @@ function ExternalAccountCard({ me, onChanged }: { me: Me; onChanged: () => void 
         <Field label={me.has_external_account ? 'Nouveau mot de passe' : 'Mot de passe'}>
           <Input type="password" value={password}
             onChange={(e) => setPassword(e.target.value)}
-            placeholder="Min 8 caractères" required={!me.has_external_account}
-            autoComplete="new-password" minLength={8} />
+            placeholder={standalone ? 'Min 10 caractères' : 'Min 8 caractères'}
+            required={standalone || !me.has_external_account}
+            autoComplete="new-password" minLength={standalone ? 10 : 8} />
         </Field>
-        <Field label="Scope d'accès">
-          <Select value={scope}
-            onChange={(e) => setScope(e.target.value as 'coloc' | 'full')}>
-            <option value="coloc">Coloc — courses, chat, récap uniquement</option>
-            <option value="full">Full — accès complet</option>
-          </Select>
-        </Field>
+        {!standalone && (
+          <Field label="Scope d'accès">
+            <Select value={scope}
+              onChange={(e) => setScope(e.target.value as 'coloc' | 'full')}>
+              <option value="coloc">Coloc — courses, chat, récap uniquement</option>
+              <option value="full">Full — accès complet</option>
+            </Select>
+          </Field>
+        )}
 
         {error && <ErrorBox message={error} />}
         {saved && (
@@ -392,7 +411,7 @@ function ExternalAccountCard({ me, onChanged }: { me: Me; onChanged: () => void 
             padding: '8px 12px', borderRadius: 8, background: 'var(--sage-bg)',
             border: '1px solid var(--sage)', marginBottom: 10,
           }}>
-            ✓ Compte externe enregistré.
+            ✓ {standalone ? 'Mot de passe mis à jour.' : 'Compte externe enregistré.'}
           </div>
         )}
 
@@ -401,7 +420,7 @@ function ExternalAccountCard({ me, onChanged }: { me: Me; onChanged: () => void 
             <RefreshCw size={14} />
             {me.has_external_account ? 'Mettre à jour' : 'Créer le compte'}
           </Button>
-          {me.has_external_account && (
+          {me.has_external_account && !standalone && (
             <Button onClick={() => { if (confirm('Supprimer le compte externe ?')) remove.mutate(); }}>
               <Trash2 size={14} /> Supprimer
             </Button>
@@ -500,8 +519,501 @@ function NotifCard({ available }: { available: boolean }) {
   );
 }
 
-// Force keep unused imports used (for Shield/UserIcon/Lock references in modal-style future expansion)
-void Shield; void UserIcon; void Lock;
+// ============================================================
+// Sécurité : passkeys (second facteur), codes de secours, sessions
+// ============================================================
+
+interface SecurityOut {
+  passkeys: { id: number; name: string; created_at: string; last_used_at: string | null }[];
+  totp_enabled: boolean;
+  recovery_codes_remaining: number;
+}
+
+interface TotpSetup { secret: string; otpauth_uri: string; qr_svg: string }
+
+function guessDeviceName(): string {
+  const ua = navigator.userAgent;
+  if (/iPhone/.test(ua)) return 'iPhone';
+  if (/iPad/.test(ua)) return 'iPad';
+  if (/Android/.test(ua)) return 'Android';
+  if (/Mac/.test(ua)) return 'Mac';
+  if (/Windows/.test(ua)) return 'PC Windows';
+  return 'Mon appareil';
+}
+
+function SecurityCard() {
+  const qc = useQueryClient();
+  const sec = useQuery({
+    queryKey: ['security'],
+    queryFn: async () => (await api.get<SecurityOut>('/passkeys/')).data,
+  });
+  const [name, setName] = useState(guessDeviceName());
+  const [codes, setCodes] = useState<string[] | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [info, setInfo] = useState<string | null>(null);
+  const refresh = () => qc.invalidateQueries({ queryKey: ['security'] });
+
+  const add = useMutation({
+    mutationFn: async () => {
+      const options = (await api.post<PublicKeyCredentialCreationOptionsJSON>('/passkeys/register/options')).data;
+      const credential = await startRegistration({ optionsJSON: options });
+      return (await api.post<{ recovery_codes: string[] | null }>('/passkeys/register', { credential, name })).data;
+    },
+    onSuccess: (d) => { if (d.recovery_codes) setCodes(d.recovery_codes); setInfo('✓ Passkey ajoutée.'); refresh(); },
+    onError: (e) => setError(
+      e instanceof Error && e.name === 'NotAllowedError' ? 'Ajout annulé.'
+        : e instanceof Error && e.name === 'InvalidStateError' ? 'Cet appareil a déjà une passkey pour ce compte.'
+          : errDetail(e),
+    ),
+  });
+  const remove = useMutation({
+    mutationFn: async (id: number) => api.delete(`/passkeys/${id}`),
+    onSuccess: refresh,
+  });
+  const regen = useMutation({
+    mutationFn: async () => (await api.post<{ recovery_codes: string[] }>('/passkeys/recovery-codes')).data,
+    onSuccess: (d) => { setCodes(d.recovery_codes); refresh(); },
+  });
+  const logoutAll = useMutation({
+    mutationFn: async () => api.post('/users/me/logout-all'),
+    onSuccess: () => setInfo('✓ Tous tes autres appareils sont déconnectés.'),
+  });
+  const [totp, setTotp] = useState<TotpSetup | null>(null);
+  const [totpCode, setTotpCode] = useState('');
+  const totpStart = useMutation({
+    mutationFn: async () => (await api.post<TotpSetup>('/passkeys/totp/setup')).data,
+    onSuccess: (d) => { setTotp(d); setTotpCode(''); },
+    onError: (e) => setError(errDetail(e)),
+  });
+  const totpEnable = useMutation({
+    mutationFn: async () => (await api.post<{ recovery_codes: string[] | null }>('/passkeys/totp/enable', { code: totpCode })).data,
+    onSuccess: (d) => {
+      setTotp(null); setTotpCode('');
+      if (d.recovery_codes) setCodes(d.recovery_codes);
+      setInfo("✓ Double authentification par appli activée."); refresh();
+    },
+    onError: (e) => setError(errDetail(e)),
+  });
+  const totpDisable = useMutation({
+    mutationFn: async () => api.post('/passkeys/totp/disable', { code: totpCode }),
+    onSuccess: () => { setTotpCode(''); setInfo('Appli d\'authentification retirée.'); refresh(); },
+    onError: (e) => setError(errDetail(e)),
+  });
+
+  const d = sec.data;
+  const enabled = (d?.passkeys.length ?? 0) > 0 || !!d?.totp_enabled;
+
+  return (
+    <Card>
+      <div className="row gap-2" style={{ alignItems: 'center', marginBottom: 4 }}>
+        <Fingerprint size={16} style={{ color: 'var(--ink-2)' }} />
+        <p className="eyebrow" style={{ margin: 0 }}>Sécurité</p>
+      </div>
+      <h3 style={{ fontFamily: 'var(--display)', fontSize: 22, margin: '4px 0 8px' }}>
+        Double authentification
+      </h3>
+      <p className="small muted">
+        Deux façons de sécuriser ton compte (tu peux avoir les deux) : un <strong>code à 6 chiffres</strong>{' '}
+        demandé après le mot de passe, ou une <strong>passkey</strong> pour te connecter
+        avec Face ID / Touch ID / empreinte, sans mot de passe.
+      </p>
+      <div className={`pill ${enabled ? 'sage' : 'amber'}`} style={{ margin: '4px 0 12px' }}>
+        {enabled ? 'Activée' : 'Désactivée — un mot de passe volé suffit à entrer'}
+      </div>
+
+      <p className="eyebrow" style={{ margin: '10px 0 6px' }}>Mot de passe + code à 6 chiffres</p>
+      {d?.totp_enabled ? (
+        <form onSubmit={(e) => { e.preventDefault(); setError(null); setInfo(null); totpDisable.mutate(); }}
+          className="row gap-2" style={{ alignItems: 'flex-end', flexWrap: 'wrap' }}>
+          <span className="pill sage" style={{ marginBottom: 14 }}>Appli d'authentification active</span>
+          <div style={{ flex: 1, minWidth: 140 }}>
+            <Field label="Code actuel pour la retirer">
+              <Input value={totpCode} onChange={(e) => setTotpCode(e.target.value)} inputMode="numeric"
+                maxLength={6} placeholder="123456" autoComplete="one-time-code" />
+            </Field>
+          </div>
+          <Button type="submit" disabled={totpCode.length !== 6 || totpDisable.isPending} style={{ marginBottom: 14 }}>
+            Retirer
+          </Button>
+        </form>
+      ) : totp ? (
+        <form onSubmit={(e) => { e.preventDefault(); setError(null); totpEnable.mutate(); }}>
+          <p className="small" style={{ marginTop: 0 }}>
+            1. Scanne ce QR code avec ton appli (Google Authenticator, Authy, 1Password, trousseau iCloud…)
+            {' '}— ou sur ce téléphone : <a href={totp.otpauth_uri}>ouvrir dans l'appli</a>.
+          </p>
+          <div className="row gap-2" style={{ alignItems: 'center', flexWrap: 'wrap', marginBottom: 10 }}>
+            <img src={totp.qr_svg} alt="QR code de l'appli d'authentification" width={160} height={160}
+              style={{ background: '#fff', borderRadius: 8 }} />
+            <div className="small muted" style={{ flex: 1, minWidth: 160, wordBreak: 'break-all' }}>
+              Clé à saisir à la main si besoin :<br /><code>{totp.secret}</code>
+            </div>
+          </div>
+          <div className="row gap-2" style={{ alignItems: 'flex-end', flexWrap: 'wrap' }}>
+            <div style={{ flex: 1, minWidth: 140 }}>
+              <Field label="2. Code affiché par l'appli">
+                <Input value={totpCode} onChange={(e) => setTotpCode(e.target.value)} inputMode="numeric"
+                  maxLength={6} placeholder="123456" autoComplete="one-time-code" autoFocus required />
+              </Field>
+            </div>
+            <Button type="submit" variant="primary" disabled={totpCode.length !== 6 || totpEnable.isPending} style={{ marginBottom: 14 }}>
+              Activer
+            </Button>
+            <Button type="button" onClick={() => setTotp(null)} style={{ marginBottom: 14 }}>Annuler</Button>
+          </div>
+        </form>
+      ) : (
+        <Button onClick={() => { setError(null); setInfo(null); totpStart.mutate(); }} disabled={totpStart.isPending}>
+          <Plus size={14} /> Activer avec une appli d'authentification
+        </Button>
+      )}
+
+      <p className="eyebrow" style={{ margin: '18px 0 6px' }}>Passkeys (connexion sans mot de passe)</p>
+
+      {d?.passkeys.map((p) => (
+        <div key={p.id} className="row between small" style={{
+          alignItems: 'center', padding: '8px 10px', borderRadius: 8, background: 'var(--bg-sunken)', marginBottom: 6,
+        }}>
+          <span>
+            <strong>{p.name}</strong>
+            <span className="muted"> · ajoutée le {new Date(p.created_at).toLocaleDateString('fr-FR')}
+              {p.last_used_at && ` · utilisée le ${new Date(p.last_used_at).toLocaleDateString('fr-FR')}`}</span>
+          </span>
+          <Button variant="ghost" aria-label="Supprimer la passkey" onClick={() => {
+            const last = d.passkeys.length === 1;
+            if (confirm(last && !d.totp_enabled ? 'Supprimer ta dernière passkey désactive la double authentification. Continuer ?'
+              : `Supprimer la passkey « ${p.name} » ?`)) remove.mutate(p.id);
+          }}><Trash2 size={12} /></Button>
+        </div>
+      ))}
+
+      <form onSubmit={(e) => { e.preventDefault(); setError(null); setInfo(null); add.mutate(); }}
+        className="row gap-2" style={{ alignItems: 'flex-end', marginTop: 8, flexWrap: 'wrap' }}>
+        <div style={{ flex: 1, minWidth: 160 }}>
+          <Field label="Nom de l'appareil">
+            <Input value={name} onChange={(e) => setName(e.target.value)} maxLength={64} required />
+          </Field>
+        </div>
+        <Button type="submit" variant="primary" disabled={add.isPending} style={{ marginBottom: 14 }}>
+          <Plus size={14} /> {(d?.passkeys.length ?? 0) > 0 ? 'Ajouter une passkey' : 'Créer une passkey sur cet appareil'}
+        </Button>
+      </form>
+      {(d?.passkeys.length ?? 0) > 0 && (
+        <p className="small muted" style={{ marginTop: 0 }}>
+          Ajoute aussi une passkey sur un 2e appareil (ordinateur + téléphone) pour ne pas dépendre d'un seul.
+          Elle sert aussi de deuxième étape après le mot de passe.
+        </p>
+      )}
+
+      {codes && (
+        <div style={{ padding: '12px 14px', borderRadius: 10, background: 'var(--amber-bg, oklch(0.94 0.04 80))', margin: '8px 0' }}>
+          <p className="small" style={{ marginTop: 0 }}>
+            <strong>Codes de secours</strong> — chacun ne sert qu'une fois, si tu perds tes appareils.
+            Note-les dans ton gestionnaire de mots de passe : <strong>ils ne seront plus affichés</strong>.
+          </p>
+          <pre style={{ margin: 0, fontFamily: 'var(--mono, monospace)', fontSize: 14, columns: 2 }}>
+            {codes.join('\n')}
+          </pre>
+          <div className="row gap-2" style={{ marginTop: 10 }}>
+            <Button onClick={() => navigator.clipboard?.writeText(codes.join('\n'))}>Copier</Button>
+            <Button variant="primary" onClick={() => setCodes(null)}>Je les ai notés</Button>
+          </div>
+        </div>
+      )}
+      {enabled && !codes && (
+        <div className="row between small" style={{ alignItems: 'center', marginTop: 4 }}>
+          <span className={d!.recovery_codes_remaining <= 3 ? 'neg' : 'muted'}>
+            {d!.recovery_codes_remaining} code(s) de secours restant(s)
+          </span>
+          <Button variant="ghost" onClick={() => {
+            if (confirm('Les anciens codes ne marcheront plus. Générer de nouveaux codes ?')) regen.mutate();
+          }}><RefreshCw size={12} /> Nouveaux codes</Button>
+        </div>
+      )}
+
+      <div style={{ borderTop: '1px solid var(--line)', marginTop: 14, paddingTop: 12 }}>
+        <Button onClick={() => {
+          if (confirm('Déconnecter tous tes autres appareils ? (celui-ci reste connecté)')) logoutAll.mutate();
+        }} disabled={logoutAll.isPending}>
+          <LogOut size={14} /> Déconnecter mes autres appareils
+        </Button>
+        <p className="small muted" style={{ marginBottom: 0 }}>
+          Changer de mot de passe le fait aussi automatiquement.
+        </p>
+      </div>
+      {error && <ErrorBox message={error} />}
+      {info && <div className="small pos" style={{ marginTop: 8 }}>{info}</div>}
+    </Card>
+  );
+}
+
+// ============================================================
+// Canaux de notification (questions de rapprochement via l'agent)
+// ============================================================
+
+interface ChannelsOut {
+  notify_channel: string;
+  links: { id: number; channel: string; handle: string }[];
+  available: string[];
+  agent_enabled: boolean;
+}
+
+const CHANNEL_LABEL: Record<string, string> = {
+  app: "Dans l'app uniquement", discord: 'Discord', imessage: 'iMessage',
+  whatsapp: 'WhatsApp', telegram: 'Telegram', signal: 'Signal',
+};
+
+function ChannelsCard() {
+  const qc = useQueryClient();
+  const channels = useQuery({
+    queryKey: ['channels'],
+    queryFn: async () => (await api.get<ChannelsOut>('/channels/')).data,
+  });
+  const [linkChannel, setLinkChannel] = useState('discord');
+  const [code, setCode] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const update = (d: ChannelsOut) => qc.setQueryData(['channels'], d);
+
+  const pref = useMutation({
+    mutationFn: async (channel: string) => (await api.put<ChannelsOut>('/channels/preference', { channel })).data,
+    onSuccess: update,
+    onError: (e) => setError(errDetail(e)),
+  });
+  const genCode = useMutation({
+    mutationFn: async () => (await api.post<{ code: string }>('/channels/link-code', { channel: linkChannel })).data,
+    onSuccess: (d) => setCode(d.code),
+  });
+  const unlink = useMutation({
+    mutationFn: async (id: number) => (await api.delete<ChannelsOut>(`/channels/links/${id}`)).data,
+    onSuccess: update,
+  });
+  const d = channels.data;
+  const linked = Array.from(new Set(d?.links.map((l) => l.channel) ?? []));
+
+  return (
+    <Card>
+      <div className="row gap-2" style={{ alignItems: 'center', marginBottom: 4 }}>
+        <Bell size={16} style={{ color: 'var(--ink-2)' }} />
+        <p className="eyebrow" style={{ margin: 0 }}>Notifications</p>
+      </div>
+      <h3 style={{ fontFamily: 'var(--display)', fontSize: 22, margin: '4px 0 8px' }}>
+        Où recevoir mes questions
+      </h3>
+      <p className="small muted">
+        Quand une opération de <strong>tes comptes perso</strong> ne colle à aucune déclaration,
+        l'assistant te la pose sur ce canal. Celles des comptes joints restent dans
+        l'app (page « À valider »), elles concernent tout le foyer.
+      </p>
+      {d && !d.agent_enabled && (
+        <p className="small" style={{ color: 'var(--ink-3)' }}>
+          Agent non configuré sur le serveur (AGENT_API_TOKEN) : seule l'app est disponible.
+        </p>
+      )}
+      {d && (
+        <>
+          <Field label="Canal préféré">
+            <Select value={d.notify_channel} onChange={(e) => { setError(null); pref.mutate(e.target.value); }}>
+              <option value="app">{CHANNEL_LABEL.app}</option>
+              {linked.map((c) => <option key={c} value={c}>{CHANNEL_LABEL[c] ?? c}</option>)}
+            </Select>
+          </Field>
+          {d.links.map((l) => (
+            <div key={l.id} className="row between small" style={{
+              alignItems: 'center', padding: '8px 10px', borderRadius: 8, background: 'var(--bg-sunken)', marginBottom: 6,
+            }}>
+              <span>{CHANNEL_LABEL[l.channel] ?? l.channel} · <code>{l.handle}</code></span>
+              <Button variant="ghost" onClick={() => unlink.mutate(l.id)} aria-label="Délier"><Trash2 size={12} /></Button>
+            </div>
+          ))}
+          {d.agent_enabled && (
+            <div style={{ marginTop: 10 }}>
+              <Field label="Lier une messagerie">
+                <div className="row gap-2" style={{ alignItems: 'center' }}>
+                  <Select value={linkChannel} onChange={(e) => { setLinkChannel(e.target.value); setCode(null); }}>
+                    {d.available.map((c) => <option key={c} value={c}>{CHANNEL_LABEL[c] ?? c}</option>)}
+                  </Select>
+                  <Button onClick={() => genCode.mutate()} disabled={genCode.isPending}>Obtenir un code</Button>
+                </div>
+              </Field>
+              {code && (
+                <div className="small" style={{ padding: '10px 12px', borderRadius: 10, background: 'var(--sage-bg)' }}>
+                  Envoie <code style={{ fontSize: 14 }}>lier {code}</code> à l'assistant depuis ton
+                  compte {CHANNEL_LABEL[linkChannel]}. Code valable 15 minutes.
+                  <Button variant="ghost" onClick={() => qc.invalidateQueries({ queryKey: ['channels'] })}>
+                    <RefreshCw size={12} /> J'ai envoyé
+                  </Button>
+                </div>
+              )}
+            </div>
+          )}
+          {error && <ErrorBox message={error} />}
+        </>
+      )}
+    </Card>
+  );
+}
+
+// ============================================================
+// Utilisateurs (admin, mode standalone)
+// ============================================================
+
+interface LocalUser {
+  user_id: number;
+  username: string | null;
+  display_name: string | null;
+  color_hex: string;
+  is_admin: boolean;
+  scope: 'coloc' | 'full' | null;
+  last_login_at: string | null;
+}
+
+function errDetail(e: unknown): string {
+  const r = (e as { response?: { data?: { detail?: unknown } } }).response;
+  const d = r?.data?.detail;
+  if (typeof d === 'string') return d;
+  if (Array.isArray(d) && d[0]?.msg) return String(d[0].msg);
+  return e instanceof Error ? e.message : 'Erreur';
+}
+
+function UsersAdminCard({ meId }: { meId: number }) {
+  const qc = useQueryClient();
+  const users = useQuery({
+    queryKey: ['local-users'],
+    queryFn: async () => (await api.get<LocalUser[]>('/users/')).data,
+  });
+  const [username, setUsername] = useState('');
+  const [displayName, setDisplayName] = useState('');
+  const [password, setPassword] = useState('');
+  const [scope, setScope] = useState<'coloc' | 'full'>('full');
+  const [isAdmin, setIsAdmin] = useState(false);
+  const [resetFor, setResetFor] = useState<number | null>(null);
+  const [resetPwd, setResetPwd] = useState('');
+  const [error, setError] = useState<string | null>(null);
+  const [info, setInfo] = useState<string | null>(null);
+
+  const refresh = () => {
+    qc.invalidateQueries({ queryKey: ['local-users'] });
+    qc.invalidateQueries({ queryKey: ['available-users'] });
+  };
+
+  const create = useMutation({
+    mutationFn: async () => (await api.post<LocalUser>('/users/', {
+      username, password, scope, is_admin: isAdmin,
+      display_name: displayName.trim() || null,
+    })).data,
+    onSuccess: (u) => {
+      setUsername(''); setDisplayName(''); setPassword(''); setIsAdmin(false); setScope('full');
+      setInfo(`✓ Compte « ${u.username} » créé. Transmets-lui son mot de passe en direct.`);
+      refresh();
+    },
+    onError: (e) => setError(errDetail(e)),
+  });
+
+  const patch = useMutation({
+    mutationFn: async ({ id, body }: { id: number; body: Record<string, unknown> }) =>
+      (await api.patch<LocalUser>(`/users/${id}`, body)).data,
+    onSuccess: () => { setResetFor(null); setResetPwd(''); setInfo('✓ Modifié.'); refresh(); },
+    onError: (e) => setError(errDetail(e)),
+  });
+
+  return (
+    <Card>
+      <div className="row gap-2" style={{ alignItems: 'center', marginBottom: 4 }}>
+        <Shield size={16} style={{ color: 'var(--ink-2)' }} />
+        <p className="eyebrow" style={{ margin: 0 }}>Administration</p>
+      </div>
+      <h3 style={{ fontFamily: 'var(--display)', fontSize: 22, margin: '4px 0 8px' }}>
+        Utilisateurs
+      </h3>
+
+      {users.isLoading && <Loader />}
+      {users.data && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 16 }}>
+          {users.data.map((u) => (
+            <div key={u.user_id} style={{
+              padding: '10px 12px', borderRadius: 10, background: 'var(--bg-sunken)',
+            }}>
+              <div className="row between" style={{ alignItems: 'center', gap: 8 }}>
+                <div className="row gap-2" style={{ alignItems: 'center', minWidth: 0 }}>
+                  <Avatar user={{ display_name: u.display_name, ha_username: u.username ?? '', color_hex: u.color_hex }} size={26} />
+                  <div style={{ minWidth: 0 }}>
+                    <div style={{ fontWeight: 500 }}>{u.display_name || u.username}</div>
+                    <div className="small muted">
+                      {u.username ?? '— pas d\'identifiants —'}
+                      {u.last_login_at && ` · vu le ${new Date(u.last_login_at).toLocaleDateString('fr-FR')}`}
+                    </div>
+                  </div>
+                </div>
+                <div className="row gap-2" style={{ alignItems: 'center', flexShrink: 0 }}>
+                  {u.is_admin && <span className="pill terra">admin</span>}
+                  {u.scope === 'coloc' && <span className="pill">coloc</span>}
+                  {u.username && (
+                    <Button onClick={() => { setResetFor(resetFor === u.user_id ? null : u.user_id); setResetPwd(''); }}>
+                      <Lock size={12} />
+                    </Button>
+                  )}
+                </div>
+              </div>
+              {resetFor === u.user_id && (
+                <form
+                  onSubmit={(e) => {
+                    e.preventDefault(); setError(null); setInfo(null);
+                    patch.mutate({ id: u.user_id, body: { password: resetPwd } });
+                  }}
+                  className="row gap-2" style={{ marginTop: 10, alignItems: 'center', flexWrap: 'wrap' }}
+                >
+                  <Input type="password" value={resetPwd} minLength={10} required
+                    autoComplete="new-password" placeholder="Nouveau mot de passe"
+                    onChange={(e) => setResetPwd(e.target.value)} style={{ flex: 1, minWidth: 160 }} />
+                  <Button type="submit" variant="primary" disabled={patch.isPending}>Réinitialiser</Button>
+                  {u.user_id !== meId && (
+                    <Button type="button" onClick={() => {
+                      setError(null); setInfo(null);
+                      patch.mutate({ id: u.user_id, body: { scope: u.scope === 'coloc' ? 'full' : 'coloc' } });
+                    }}>
+                      {u.scope === 'coloc' ? 'Passer en full' : 'Limiter à coloc'}
+                    </Button>
+                  )}
+                </form>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+
+      <p className="eyebrow" style={{ marginBottom: 8 }}>Ajouter un utilisateur</p>
+      <form onSubmit={(e) => { e.preventDefault(); setError(null); setInfo(null); create.mutate(); }}>
+        <Field label="Identifiant">
+          <Input value={username} onChange={(e) => setUsername(e.target.value)}
+            placeholder="ex : camille" required minLength={3} autoComplete="off" />
+        </Field>
+        <Field label="Nom affiché">
+          <Input value={displayName} onChange={(e) => setDisplayName(e.target.value)}
+            placeholder="ex : Camille" />
+        </Field>
+        <Field label="Mot de passe initial">
+          <Input type="password" value={password} onChange={(e) => setPassword(e.target.value)}
+            placeholder="Min 10 caractères" required minLength={10} autoComplete="new-password" />
+        </Field>
+        <Field label="Accès">
+          <Select value={scope} onChange={(e) => setScope(e.target.value as 'coloc' | 'full')}>
+            <option value="full">Complet — budget perso + coloc</option>
+            <option value="coloc">Coloc — courses, chat, récap uniquement</option>
+          </Select>
+        </Field>
+        <label className="row gap-2 small" style={{ alignItems: 'center', margin: '4px 0 12px', cursor: 'pointer' }}>
+          <input type="checkbox" checked={isAdmin} onChange={(e) => setIsAdmin(e.target.checked)} />
+          <UserIcon size={12} /> Administrateur
+        </label>
+        {error && <ErrorBox message={error} />}
+        {info && <div className="small pos" style={{ marginBottom: 10 }}>{info}</div>}
+        <Button type="submit" variant="primary" disabled={create.isPending}>
+          <Plus size={14} /> Créer le compte
+        </Button>
+      </form>
+    </Card>
+  );
+}
 
 // ============================================================
 // LLM Settings — modifier le provider/clé depuis l'UI sans toucher au YAML
@@ -523,6 +1035,12 @@ interface LLMSettings {
   tpm_limit: number | null;
   rpd_limit: number | null;
   exclude_joint_charges_from_personal: boolean;
+  env_overrides?: string[];
+}
+
+interface LLMTest {
+  ok: boolean; provider: string; model: string; base_url: string | null;
+  reply?: string; error?: string; env_overrides: string[];
 }
 
 function LLMSettingsCard() {
@@ -538,12 +1056,16 @@ function LLMSettingsCard() {
   const [form, setForm] = useState<Partial<LLMSettings & { api_key: string }>>({});
   const [showKey, setShowKey] = useState(false);
 
+  const test = useMutation({
+    mutationFn: async () => (await api.post<LLMTest>('/settings/llm/test')).data,
+  });
   const save = useMutation({
     mutationFn: async () => api.patch('/settings/llm', form),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['settings', 'llm'] });
       qc.invalidateQueries({ queryKey: ['chat', 'status'] });
       setForm({});
+      test.mutate();
     },
   });
 
@@ -567,11 +1089,18 @@ function LLMSettingsCard() {
       <p className="small muted" style={{ marginTop: 0 }}>
         Surcharge la config.yaml de l'add-on, prend effet immédiatement. Laisse vide pour utiliser la valeur de l'add-on.
       </p>
+      {!!cur?.env_overrides?.length && (
+        <ErrorBox message={`Le fichier .env du serveur définit ${cur.env_overrides.join(', ')} : ces valeurs priment sur ce formulaire. Vide-les dans .env puis redémarre l'app (docker compose up -d) pour régler l'IA ici.`} />
+      )}
 
       <Field label="Provider">
         <Select
           value={selectedProvider}
-          onChange={(e) => setForm({ ...form, provider: e.target.value })}
+          // Modèle et URL d'un autre provider ne marcheraient pas : retour aux valeurs du preset
+          onChange={(e) => setForm({
+            ...form, provider: e.target.value,
+            ...(e.target.value !== 'custom' ? { model: '', base_url: '' } : {}),
+          })}
         >
           <option value="">— Utiliser la valeur de la config.yaml —</option>
           {provs.map((p) => (
@@ -655,7 +1184,21 @@ function LLMSettingsCard() {
       {save.isError && (
         <ErrorBox message={save.error instanceof Error ? save.error.message : 'Erreur'} />
       )}
+      {test.data && (
+        <div className="small" style={{
+          padding: '10px 12px', borderRadius: 10, marginTop: 12, wordBreak: 'break-word',
+          background: test.data.ok ? 'var(--sage-bg)' : 'var(--rose-bg)',
+          color: test.data.ok ? undefined : 'var(--rose)',
+        }}>
+          <strong>{test.data.ok ? '✓ L\'IA répond' : '✗ L\'IA ne répond pas'}</strong>
+          {' '}({test.data.provider} · {test.data.model}{test.data.base_url ? ` · ${test.data.base_url}` : ''})
+          {test.data.error && <div style={{ marginTop: 6, fontFamily: 'var(--mono, monospace)' }}>{test.data.error}</div>}
+        </div>
+      )}
       <div className="row gap-2" style={{ marginTop: 12, justifyContent: 'flex-end' }}>
+        <Button onClick={() => test.mutate()} disabled={test.isPending}>
+          {test.isPending ? 'Test…' : 'Tester'}
+        </Button>
         <Button onClick={() => setForm({})}>Annuler</Button>
         <Button variant="primary" onClick={() => save.mutate()} disabled={save.isPending || Object.keys(form).length === 0}>
           {save.isPending ? 'Enregistrement…' : 'Enregistrer'}

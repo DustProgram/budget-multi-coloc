@@ -28,6 +28,12 @@ jobs:
         working-directory: budget-app/backend
         run: pytest tests/ -v --cov=. --cov-report=term-missing
 
+      - name: Audit des dépendances (CVE connues)
+        working-directory: budget-app/backend
+        run: |
+          pip install pip-audit
+          pip-audit -r requirements.txt
+
   frontend:
     name: Frontend tests (vitest)
     runs-on: ubuntu-latest

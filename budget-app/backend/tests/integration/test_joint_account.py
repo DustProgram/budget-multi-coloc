@@ -1,6 +1,7 @@
 """Tests d'intégration pour les comptes joints multi-utilisateurs :
 auto-création des ChargeSplit selon le mode, settle/unsettle, min-cash-flow.
 """
+from datetime import date
 from decimal import Decimal
 
 import pytest
@@ -101,6 +102,7 @@ def test_breakdown_with_min_cash_flow(db, trio):
             user_id=payer.id, label=label, total_amount=Decimal(amount),
             frequency=Frequency.MENSUELLE, day_of_month=5,
             split_mode=SplitMode.EGAL, account_id=joint.id,
+            valid_from=date(2026, 1, 1),
         )
         db.add(ch)
         db.flush()
@@ -130,6 +132,7 @@ def test_settle_excludes_from_due(db, trio):
         user_id=lucas.id, label="Loyer", total_amount=Decimal("1320"),
         frequency=Frequency.MENSUELLE, day_of_month=5,
         split_mode=SplitMode.EGAL, account_id=joint.id,
+        valid_from=date(2026, 1, 1),
     )
     db.add(loyer)
     db.flush()

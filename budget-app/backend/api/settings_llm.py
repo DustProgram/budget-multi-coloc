@@ -2,6 +2,7 @@
 l'UI in-app, sans redémarrer l'add-on. Les valeurs sont stockées dans
 la table `Settings` et priment sur la config.yaml.
 """
+import os
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Request
@@ -23,6 +24,15 @@ class LLMSettingsOut(BaseModel):
     tpm_limit: Optional[int]
     rpd_limit: Optional[int]
     exclude_joint_charges_from_personal: bool
+    # Variables du .env qui priment sur ces réglages (sinon l'UI semble ne rien faire)
+    env_overrides: list[str] = []
+
+
+ENV_KEYS = {"provider": "LLM_PROVIDER", "api_key": "LLM_API_KEY", "model": "LLM_MODEL", "base_url": "LLM_BASE_URL"}
+
+
+def _env_overrides() -> list[str]:
+    return [v for v in ENV_KEYS.values() if (os.environ.get(v) or "").strip()]
 
 
 class LLMSettingsIn(BaseModel):
@@ -61,6 +71,7 @@ async def get_llm_settings(request: Request, db: Session = Depends(get_db)):
         tpm_limit=s.llm_tpm_limit,
         rpd_limit=s.llm_rpd_limit,
         exclude_joint_charges_from_personal=bool(getattr(s, "exclude_joint_charges_from_personal", False)),
+        env_overrides=_env_overrides(),
     )
 
 
@@ -105,4 +116,25 @@ async def update_llm_settings(
         tpm_limit=s.llm_tpm_limit,
         rpd_limit=s.llm_rpd_limit,
         exclude_joint_charges_from_personal=bool(getattr(s, "exclude_joint_charges_from_personal", False)),
+        env_overrides=_env_overrides(),
     )
+
+
+@router.post("/llm/test")
+async def test_llm_settings(request: Request):
+    """Petit appel réel (avec les outils du chat) pour afficher l'erreur exacte du provider."""
+    from services import ai_tools
+    from services.llm_client import LLMError, get_llm_client, get_llm_config
+    if not request.state.user.is_admin:
+        raise HTTPException(403, "Réservé à l'admin")
+    cfg = get_llm_config()
+    info = {"provider": cfg["provider"], "model": cfg["model"], "base_url": cfg["base_url"] or None,
+            "env_overrides": _env_overrides()}
+    try:
+        reply = get_llm_client().chat(
+            messages=[{"role": "user", "content": "Test de connexion : réponds seulement OK."}],
+            system="Tu réponds en un mot.", tools=ai_tools.TOOL_DEFINITIONS, max_tokens=20,
+        )
+    except LLMError as e:
+        return {**info, "ok": False, "error": str(e)}
+    return {**info, "ok": True, "reply": reply.text or ("(appel d'outil)" if reply.tool_calls else "")}

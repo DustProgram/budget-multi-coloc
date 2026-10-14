@@ -2,3 +2,6 @@
 **/.DS_Store
 error/
 *.log
+
+# Secrets du déploiement VPS
+deploy/.env

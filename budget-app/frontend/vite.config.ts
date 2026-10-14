@@ -32,15 +32,17 @@ export default defineConfig({
         // otherwise hijack /api/hassio_ingress/<token>/ requests on offline reload.
         navigateFallbackDenylist: [/^\/api\//],
         runtimeCaching: [
-          // API GET → stale-while-revalidate : on sert le cache immédiatement,
-          // on rafraîchit en arrière-plan. Marche aussi pour les paths préfixés
-          // par /api/hassio_ingress/<token>/api/...
+          // API GET → réseau d'abord, cache seulement hors-ligne. (En
+          // stale-while-revalidate, un refetch après mutation recevait
+          // l'ancienne réponse : listes pas à jour.) Marche aussi pour les
+          // paths préfixés par /api/hassio_ingress/<token>/api/...
           {
             urlPattern: ({ request, url }) =>
               request.method === 'GET' && url.pathname.includes('/api/'),
-            handler: 'StaleWhileRevalidate',
+            handler: 'NetworkFirst',
             options: {
               cacheName: 'api-get-cache',
+              networkTimeoutSeconds: 5,
               expiration: { maxEntries: 200, maxAgeSeconds: 60 * 60 * 24 * 7 },
               cacheableResponse: { statuses: [0, 200] },
             },

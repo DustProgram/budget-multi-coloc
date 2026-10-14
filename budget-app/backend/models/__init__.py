@@ -8,7 +8,7 @@ from enum import Enum
 
 from sqlalchemy import (
     Boolean, Column, Date, DateTime, Enum as SQLEnum, ForeignKey,
-    Integer, Numeric, String, Text, Index,
+    Integer, Numeric, String, Text, Index, UniqueConstraint,
 )
 from sqlalchemy.orm import relationship
 
@@ -122,6 +122,16 @@ class User(Base):
     # Quand True, l'UI affiche le switcher Perso/Pro et la rubrique Compta-pro.
     # Utilisable pour micro-entrepreneur / freelance qui veut un suivi séparé.
     pro_enabled = Column(Boolean, default=False)
+    # Canal où recevoir les questions de rapprochement : 'app' ou un canal
+    # lié via ChannelLink (discord, imessage, whatsapp, telegram).
+    notify_channel = Column(String(16), default="app", nullable=False)
+    # Incrémenté pour invalider toutes les sessions (changement de mot de
+    # passe, « déconnecter partout », ajout de passkey). Porté par le cookie.
+    session_version = Column(Integer, default=0, nullable=False)
+    # Double authentification par appli (code à 6 chiffres, RFC 6238)
+    totp_secret = Column(String(64), nullable=True)
+    totp_enabled = Column(Boolean, default=False, nullable=False)
+    totp_last_step = Column(Integer, default=0, nullable=False)  # anti-rejeu d'un code déjà utilisé
 
 
 # ============================================================
@@ -143,6 +153,8 @@ class Account(Base):
     # 'perso' (par défaut) ou 'pro' pour les comptes liés à l'activité professionnelle.
     # L'UI filtre via le switcher Perso/Pro quand pro_enabled est activé sur l'user.
     space = Column(String(8), default="perso", nullable=False, index=True)
+    # Numéro de compte (11 car.) lu sur un relevé : reconnaît le compte à l'import
+    statement_ref = Column(String(34), nullable=True)
 
     user = relationship("User", backref="accounts")
     members = relationship("AccountMember", back_populates="account", cascade="all, delete-orphan")
@@ -666,3 +678,129 @@ class LLMUsage(Base):
     input_tokens = Column(Integer, default=0, nullable=False)
     output_tokens = Column(Integer, default=0, nullable=False)
     kind = Column(String(20), default="chat", nullable=False)  # 'chat' | 'vision'
+
+
+# ============================================================
+# Relevés bancaires réels + rapprochement avec les déclarations
+# ============================================================
+
+class BankTransaction(Base):
+    """Ligne de relevé importée (CSV/OFX/PDF/agent).
+
+    `match_kind` + `match_id` pointent vers la déclaration rapprochée :
+    charge | income | recurring_transfer | onetime_transfer | saving |
+    purchase | contribution | ignore. Pour une 'contribution' (abondement
+    d'un compte joint), `contributor_user_id` dit qui a versé.
+    """
+    __tablename__ = "bank_transactions"
+
+    id = Column(Integer, primary_key=True)
+    account_id = Column(Integer, ForeignKey("accounts.id", ondelete="CASCADE"), nullable=False, index=True)
+    imported_by_user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    date = Column(Date, nullable=False, index=True)
+    amount = Column(Numeric(12, 2), nullable=False)  # signé : < 0 = sortie
+    label = Column(String(256), nullable=False)
+    source = Column(String(16), nullable=False)  # csv | ofx | pdf | image | api
+    fingerprint = Column(String(64), nullable=False)
+    status = Column(String(16), default="to_review", nullable=False, index=True)
+    match_kind = Column(String(24), nullable=True)
+    match_id = Column(Integer, nullable=True)
+    contributor_user_id = Column(Integer, ForeignKey("users.id"), nullable=True)
+    rule_id = Column(Integer, ForeignKey("matching_rules.id", ondelete="SET NULL"), nullable=True)
+    notified_at = Column(DateTime, nullable=True)
+    resolved_by_user_id = Column(Integer, ForeignKey("users.id"), nullable=True)
+    resolved_at = Column(DateTime, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    account = relationship("Account")
+
+    __table_args__ = (
+        UniqueConstraint("account_id", "fingerprint", name="uq_bank_tx_fingerprint"),
+        Index("ix_bank_tx_account_date", "account_id", "date"),
+    )
+
+
+class MatchingRule(Base):
+    """Règle apprise d'une validation : tous les tokens de `pattern` présents
+    dans le libellé normalisé (+ montant dans la fourchette) → même rapprochement."""
+    __tablename__ = "matching_rules"
+
+    id = Column(Integer, primary_key=True)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    account_id = Column(Integer, ForeignKey("accounts.id", ondelete="CASCADE"), nullable=True)
+    pattern = Column(String(128), nullable=False)
+    amount_min = Column(Numeric(12, 2), nullable=True)
+    amount_max = Column(Numeric(12, 2), nullable=True)
+    match_kind = Column(String(24), nullable=False)
+    match_id = Column(Integer, nullable=True)
+    contributor_user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=True)
+    category = Column(String(64), nullable=True)
+    hits = Column(Integer, default=0, nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+
+class ChannelLink(Base):
+    """Identité d'un user sur une messagerie (Discord, iMessage…), liée via
+    un code à usage unique envoyé à l'agent. Sert à savoir qui parle à Hermes."""
+    __tablename__ = "channel_links"
+
+    id = Column(Integer, primary_key=True)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    channel = Column(String(16), nullable=False)
+    handle = Column(String(128), nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    __table_args__ = (
+        UniqueConstraint("channel", "handle", name="uq_channel_handle"),
+    )
+
+
+# ============================================================
+# Second facteur : passkeys (WebAuthn) + codes de secours
+# ============================================================
+
+class Passkey(Base):
+    """Passkey demandée après le mot de passe dès qu'un user en a au moins une."""
+    __tablename__ = "passkeys"
+
+    id = Column(Integer, primary_key=True)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    credential_id = Column(String(1024), unique=True, nullable=False)  # base64url
+    public_key = Column(Text, nullable=False)  # base64url (COSE)
+    sign_count = Column(Integer, default=0, nullable=False)
+    transports = Column(String(128), nullable=True)
+    name = Column(String(64), nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    last_used_at = Column(DateTime, nullable=True)
+
+
+class RecoveryCode(Base):
+    __tablename__ = "recovery_codes"
+
+    id = Column(Integer, primary_key=True)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    code_hash = Column(String(64), nullable=False)
+    used_at = Column(DateTime, nullable=True)
+
+
+# ============================================================
+# Enveloppes « vie quotidienne » (perso ou commune sur compte joint)
+# ============================================================
+
+class Envelope(Base):
+    """Budget mensuel pour les petites dépenses variables, sans les détailler.
+
+    Perso : `user_id` renseigné, `account_id` nul. Commune : `account_id` = compte
+    joint, partagée à parts égales entre ses membres. Les opérations de relevé
+    sous `big_purchase_threshold` y sont comptées automatiquement (match_kind
+    'daily') ; au-dessus, l'app demande « achat exceptionnel ou quotidien ? ».
+    """
+    __tablename__ = "envelopes"
+
+    id = Column(Integer, primary_key=True)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=True, index=True)
+    account_id = Column(Integer, ForeignKey("accounts.id", ondelete="CASCADE"), nullable=True, index=True)
+    label = Column(String(64), nullable=False)
+    monthly_amount = Column(Numeric(12, 2), default=0, nullable=False)
+    big_purchase_threshold = Column(Numeric(12, 2), default=150, nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow)
