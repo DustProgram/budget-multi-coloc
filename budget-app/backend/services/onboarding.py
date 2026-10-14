@@ -20,7 +20,9 @@ from sqlalchemy.orm import Session
 
 from models import BankTransaction, User
 from services import reconciliation as rec
-from services.access import accessible_account_ids, user_can_write_account
+from services.access import (
+    account_member_user_ids, accessible_account_ids, is_joint_account, user_can_write_account,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -29,6 +31,7 @@ GENERIC = {
     "EMIS", "RECU", "AUTOMATIQUE", "FACTURE", "PAIEMENT", "ACHAT", "DE", "DU", "LA", "LE",
     "MR", "MME", "M", "SAS", "SARL", "SA", "ET", "CIE", "SCA", "EUROPE", "WWW", "COM", "FR",
     "ECHEANCE", "EN", "TROIS", "FOIS", "COTISATION", "ESPECE", "VERSEMENT",
+    "VERS", "POUR", "IBAN", "AUTOMATIQUE", "PENDING",
 }
 # Prélèvements, virements programmés… : un montant qui revient = vraie charge.
 SCHEDULED_PREFIXES = ("PRELEVEMENT", "PRLV", "VIREMENT AUTOMATIQUE", "COTISATION", "ECHEANCE")
@@ -92,6 +95,8 @@ class Group:
     category: Optional[str] = None
     reason: str = ""
     examples: list[str] = field(default_factory=list)
+    contributor_user_id: Optional[int] = None
+    contributor_name: Optional[str] = None
 
     @property
     def id(self) -> str:
@@ -135,10 +140,21 @@ def suggest_groups(db: Session, user: User, account_id: Optional[int] = None) ->
         by_merchant.setdefault((t.account_id, t.amount < 0, merchant_key(t.label)), []).append(t)
 
     me = _own_names(user)
+    members_by_account = {
+        aid: _member_first_names(db, aid) for aid in {a for (a, _, _) in by_merchant} if is_joint_account(db, aid)
+    }
     groups: list[Group] = []
-    for (_, is_debit, key), items in by_merchant.items():
+    for (account, is_debit, key), items in by_merchant.items():
         sample = rec.normalize_label(items[0].label)
         toks = set(merchant_tokens(items[0].label))
+        if not is_debit and account in members_by_account:
+            member = next(((uid, name) for first, uid, name in members_by_account[account] if first in toks), None)
+            if member:
+                g = _group("contribution", key, items, reason=f"Virement de {member[1]} sur le compte joint")
+                g.contributor_user_id, g.contributor_name = member
+                g.label = f"Abondement de {member[1]}"
+                groups.append(g)
+                continue
         is_transfer = sample.startswith(("VIR", "VIREMENT")) and not sample.startswith("VIREMENT AUTOMATIQUE")
         own = any(n <= toks for n in me)
         if is_transfer and own:
@@ -182,9 +198,19 @@ def suggest_groups(db: Session, user: User, account_id: Optional[int] = None) ->
                                  reason="Catégorie devinée" if category else "Catégorie à préciser"))
 
     _categorize_unknown_with_llm(db, user, [g for g in groups if g.reason == "Catégorie à préciser"])
-    order = {"new_income": 0, "new_charge": 1, "ignore": 2, "new_purchase": 3}
+    order = {"contribution": 0, "new_income": 1, "new_charge": 2, "ignore": 3, "new_purchase": 4}
     groups.sort(key=lambda g: (order[g.kind], -g.total))
     return groups
+
+
+def _member_first_names(db: Session, account_id: int) -> list[tuple[str, int, str]]:
+    out = []
+    for u in db.query(User).filter(User.id.in_(account_member_user_ids(db, account_id))).all():
+        name = u.display_name or u.ha_username
+        first = (rec.normalize_label(name).split() or [""])[0]
+        if len(first) >= 3:
+            out.append((first, u.id, name))
+    return out
 
 
 def _group(kind: str, key: str, txs: list[BankTransaction], amount: Optional[Decimal] = None,
@@ -209,6 +235,7 @@ def _group(kind: str, key: str, txs: list[BankTransaction], amount: Optional[Dec
 def apply_group(
     db: Session, user: User, tx_ids: list[int], kind: str, label: str,
     category: Optional[str], amount: Optional[Decimal], create_rule: bool, pattern: Optional[str],
+    contributor_user_id: Optional[int] = None,
 ) -> int:
     """Applique une décision à toutes les opérations du groupe. Retourne le nb traité."""
     allowed = set(accessible_account_ids(db, user.id))
@@ -232,6 +259,11 @@ def apply_group(
                     create_rule=create_rule, rule_pattern=rule_pattern)
         for t in rest:
             rec.resolve(db, t, user, "new_purchase", category=category)
+    elif kind == "contribution":
+        rec.resolve(db, first, user, "contribution", target_id=contributor_user_id,
+                    create_rule=create_rule, rule_pattern=rule_pattern)
+        for t in rest:
+            rec.resolve(db, t, user, "contribution", target_id=contributor_user_id)
     elif kind == "ignore":
         rec.resolve(db, first, user, "ignore", create_rule=create_rule, rule_pattern=rule_pattern)
         for t in rest:

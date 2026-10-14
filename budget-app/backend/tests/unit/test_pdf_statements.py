@@ -72,3 +72,51 @@ def test_columns_signs_labels_and_balance_check():
 def test_wrong_closing_is_not_verified():
     res = parse_pdf_columns(_bred_like(closing="999,99"))
     assert len(res.rows) == 3 and res.verified is False
+
+
+def _sumeria_like() -> bytes:
+    """Mise en page type Sumeria : montants à point décimal, dates jj/mm sans année,
+    colonne Solde courant à droite, soldes d'ouverture/clôture hors tableau."""
+    buf = io.BytesIO()
+    c = canvas.Canvas(buf)
+    c.drawString(40, 800, "Période du 01/09/2026 au 30/09/2026")
+    c.drawString(294, 760, "Solde confirmé du compte au 01/09/2026 : 4.82 €")
+    for x, word in ((45, "Date"), (199, "Description"), (404, "Débit"), (455, "Crédit"), (507, "Solde")):
+        c.drawString(x, 720, word)
+    rows = [
+        ("02/09", "Virement SEPA reçu de MR PAUL MARTIN", None, "530.00", "534.82", ['pour ""']),
+        ("07/09", "Prélèvement automatique :", "37.77", None, "497.05", ["Réf. externe : HABITATION 018705193",
+                                                                      "Réf. interne :",
+                                                                      "099223b1-94a6-456d-a646-2e722f60f8f0"]),
+        ("07/09", "Virement SEPA émis vers l’iban", "412.00", None, "85.05", ['FR761751 pour "Loyer"']),
+    ]
+    y = 700
+    for d, label, debit, credit, solde, details in rows:
+        c.drawString(45, y, d)
+        c.drawString(122, y, d)
+        c.drawString(199, y, label)
+        if debit:
+            c.drawRightString(428, y, debit)
+        if credit:
+            c.drawRightString(481, y, credit)
+        c.drawRightString(532, y, solde)
+        for det in details:
+            y -= 10
+            c.drawString(199, y, det)
+        y -= 22
+    c.drawString(288, y - 20, "Solde confirmé du compte au 30/09/2026 : 85.05 €")
+    c.save()
+    return buf.getvalue()
+
+
+def test_sumeria_layout():
+    res = parse_pdf_columns(_sumeria_like())
+    assert (res.opening, res.closing, res.verified) == (Decimal("4.82"), Decimal("85.05"), True)
+    assert [(r.date, r.amount) for r in res.rows] == [
+        (date(2026, 9, 2), Decimal("530.00")),
+        (date(2026, 9, 7), Decimal("-37.77")),
+        (date(2026, 9, 7), Decimal("-412.00")),
+    ]
+    # Noms gardés (pas pris pour des références), identifiants techniques retirés
+    assert res.rows[0].label == "Virement SEPA reçu de MR PAUL MARTIN"
+    assert res.rows[1].label == "Prélèvement automatique : HABITATION 018705193"

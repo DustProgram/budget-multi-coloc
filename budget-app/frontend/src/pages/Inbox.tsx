@@ -38,9 +38,11 @@ interface FileResult extends ImportResult { name: string; error?: string }
 
 interface Suggestion {
   id: string;
-  kind: 'new_charge' | 'new_income' | 'new_purchase' | 'ignore';
+  kind: 'new_charge' | 'new_income' | 'new_purchase' | 'ignore' | 'contribution';
   label: string;
   pattern: string;
+  contributor_user_id: number | null;
+  contributor_name: string | null;
   tx_ids: number[];
   amount: string;
   day: number;
@@ -212,6 +214,7 @@ const KIND_CHOICES: { value: Suggestion['kind']; label: string }[] = [
 ];
 
 const SECTIONS: { kind: Suggestion['kind']; title: string; hint: string }[] = [
+  { kind: 'contribution', title: 'Abondements du compte joint', hint: 'Comptés comme versés par chaque coloc (récap coloc).' },
   { kind: 'new_income', title: 'Revenus qui reviennent chaque mois', hint: 'Déclarés comme revenus mensuels.' },
   { kind: 'new_charge', title: 'Charges qui reviennent chaque mois', hint: 'Déclarées comme charges mensuelles (abonnements, prélèvements…).' },
   { kind: 'ignore', title: 'À ignorer', hint: 'Virements entre tes comptes, remboursements, entrées ponctuelles.' },
@@ -245,6 +248,7 @@ function OnboardingPanel({ count, onDone }: { count: number; onDone: () => void 
         return {
           tx_ids: g.tx_ids, kind: d.kind, label: d.label, category: d.kind === 'new_purchase' ? d.category : null,
           amount: g.amount, create_rule: remember, pattern: g.pattern,
+          contributor_user_id: d.kind === 'contribution' ? g.contributor_user_id : null,
         };
       });
       return (await api.post<{ applied: number; errors: string[] }>('/bank/onboarding/apply', { groups })).data;
@@ -312,6 +316,9 @@ function OnboardingPanel({ count, onDone }: { count: number; onDone: () => void 
                       style={{ flex: '2 1 160px', minWidth: 120 }} title={g.examples.join('\n')} />
                     <Select value={d.kind} onChange={(e) => set(g.id, { kind: e.target.value as Suggestion['kind'] })}
                       style={{ flex: '1 1 130px' }}>
+                      {g.contributor_user_id != null && (
+                        <option value="contribution">Abondement de {g.contributor_name}</option>
+                      )}
                       {KIND_CHOICES.map((k) => <option key={k.value} value={k.value}>{k.label}</option>)}
                     </Select>
                     {d.kind === 'new_purchase' && (

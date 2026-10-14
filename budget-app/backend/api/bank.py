@@ -225,6 +225,8 @@ class GroupOut(BaseModel):
     category: Optional[str]
     reason: str
     examples: list[str]
+    contributor_user_id: Optional[int] = None
+    contributor_name: Optional[str] = None
 
 
 class GroupIn(BaseModel):
@@ -235,6 +237,7 @@ class GroupIn(BaseModel):
     amount: Optional[Decimal] = None
     create_rule: bool = True
     pattern: Optional[str] = None
+    contributor_user_id: Optional[int] = None
 
 
 class ApplyIn(BaseModel):
@@ -249,7 +252,8 @@ async def onboarding_suggestions(
     return [
         GroupOut(id=g.id, kind=g.kind, label=g.label, pattern=g.pattern, tx_ids=g.tx_ids,
                  amount=g.amount, day=g.day, months=g.months, count=len(g.tx_ids), total=g.total,
-                 category=g.category, reason=g.reason, examples=g.examples)
+                 category=g.category, reason=g.reason, examples=g.examples,
+                 contributor_user_id=g.contributor_user_id, contributor_name=g.contributor_name)
         for g in groups
     ]
 
@@ -262,7 +266,7 @@ async def onboarding_apply(payload: ApplyIn, request: Request, db: Session = Dep
         try:
             applied += onboarding.apply_group(
                 db, user, g.tx_ids, g.kind, g.label.strip(), g.category, g.amount,
-                g.create_rule and bool(g.pattern), g.pattern,
+                g.create_rule and bool(g.pattern), g.pattern, g.contributor_user_id,
             )
         except ValueError as e:
             db.rollback()

@@ -1,6 +1,6 @@
 """Lecture locale (sans IA) des relevés PDF à colonnes Débit / Crédit.
 
-Testé sur les relevés BRED et BoursoBank. Le texte brut d'un PDF ne dit pas
+Testé sur les relevés BRED, BoursoBank et Sumeria. Le texte brut d'un PDF ne dit pas
 si un montant est au débit ou au crédit : on lit la position X de chaque
 mot (pdfminer) et on compare au bord droit des en-têtes « Débit » / « Crédit ».
 Le résultat est vérifié par le solde : ancien solde + crédits − débits doit
@@ -18,10 +18,11 @@ from typing import Optional
 
 from services.statement_parsers import ParsedTx, parse_amount
 
-_AMOUNT = re.compile(r"^\d{1,3}(?:[.  ]\d{3})*,\d{2}$")
+_AMOUNT = re.compile(r"^(?:\d{1,3}(?:[.  ]\d{3})*,\d{2}|\d+\.\d{2})$")  # 1.234,56 ou 1234.56 (Sumeria)
 _DATE_SHORT = re.compile(r"^(\d{2})\.(\d{2})$")              # BRED : 28.07
 _DATE_VALUE = re.compile(r"^(\d{2})\.(\d{2})\.(\d{2})$")     # BRED : 28.07.26
 _DATE_LONG = re.compile(r"^(\d{2})/(\d{2})/(\d{4})$")        # Bourso : 04/08/2026
+_DATE_DM = re.compile(r"^(\d{2})/(\d{2})$")                  # Sumeria : 02/09
 _YEAR_HINT = re.compile(r"\b(20\d{2})\b")
 _NOISE = [
     re.compile(r"\ble \d{2}/\d{2}/\d{2,4}\b"),
@@ -32,7 +33,11 @@ _NOISE = [
     re.compile(r"\bmontant\s*:.*", re.I),
     re.compile(r"\bnotprovided\b", re.I),
     re.compile(r"\d{2}/\d{2}/\d{4} \d{2}:\d{2}:\d{2}.*"),
-    re.compile(r"\bR.f\s*:.*", re.I),
+    re.compile(r"\bR.f\.?\s*interne\s*:.*", re.I),
+    re.compile(r"\bR.f\.?\s*(?:externe\s*)?:", re.I),
+    re.compile(r"\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b", re.I),
+    re.compile(r'\bpour\s*""'),
+    re.compile(r'"'),
 ]
 _STOP = ("total des mouvements", "nouveau solde", "poste annexe", "montant frais bancaires")
 
@@ -111,6 +116,7 @@ def parse_pdf_columns(data: bytes) -> LocalStatement:
 
     res = LocalStatement()
     year_hint: Optional[int] = None
+    period_end: Optional[date] = None
     current: Optional[dict] = None
     stopped = False
 
@@ -127,6 +133,8 @@ def parse_pdf_columns(data: bytes) -> LocalStatement:
         if year_hint is None:
             years = [int(y) for l in lines for w in l for y in _YEAR_HINT.findall(w.text)]
             year_hint = max(years) if years else date.today().year
+            full = [_parse_op_date(w.text, [], year_hint) for l in lines for w in l if _DATE_LONG.match(w.text)]
+            period_end = max((d for d in full if d), default=None)
         debit_x1 = credit_x1 = None
         in_table = False
         for line in lines:
@@ -138,15 +146,22 @@ def parse_pdf_columns(data: bytes) -> LocalStatement:
                 in_table = not stopped
                 close_current()
                 continue
+            all_amounts = [w for w in line if _AMOUNT.match(w.text)]
+            if "solde" in joined and any(k in joined for k in ("precedent", "solde au", "solde confirme")):
+                # Sumeria met le solde d'ouverture au-dessus du tableau et celui
+                # de clôture en dessous : on les lit même hors tableau.
+                if all_amounts and not res.rows and res.opening is None:
+                    res.opening = parse_amount(all_amounts[-1].text)
+                elif all_amounts and res.rows and "solde confirme" in joined:
+                    close_current()
+                    res.closing = parse_amount(all_amounts[-1].text)
+                    stopped, in_table = True, False
+                continue
             if not in_table:
                 continue
             boundary = (debit_x1 + credit_x1) / 2
-            amounts = [w for w in line if _AMOUNT.match(w.text) and w.x1 > debit_x1 - 60]
-
-            if "solde" in joined and ("precedent" in joined or "solde au" in joined):
-                if amounts and res.opening is None:
-                    res.opening = parse_amount(amounts[-1].text)
-                continue
+            # Pas au-delà de la colonne Crédit : Sumeria y affiche un solde courant
+            amounts = [w for w in all_amounts if debit_x1 - 60 < w.x1 <= credit_x1 + 25]
             if any(s in joined for s in _STOP):
                 close_current()
                 if "nouveau solde" in joined:
@@ -160,6 +175,8 @@ def parse_pdf_columns(data: bytes) -> LocalStatement:
 
             first = line[0].text
             d = _parse_op_date(first, line, year_hint)
+            if d and period_end and d > period_end and _DATE_DM.match(first):
+                d = d.replace(year=d.year - 1)  # relevé à cheval sur décembre / janvier
             if d is not None and amounts:
                 close_current()
                 amt_word = amounts[-1]
@@ -169,7 +186,9 @@ def parse_pdf_columns(data: bytes) -> LocalStatement:
                     w.text for w in line[1:]
                     if w is not amt_word and not _AMOUNT.match(w.text)
                     and not _DATE_VALUE.match(w.text) and not _DATE_LONG.match(w.text)
-                    and not (w.x0 > debit_x1 - 140 and re.fullmatch(r"[0-9a-zA-Z]{6,8}", w.text))
+                    and not _DATE_DM.match(w.text)
+                    # colonne Référence BRED (1597480, 3c31b5a…) : toujours au moins un chiffre
+                    and not (w.x0 > debit_x1 - 140 and re.fullmatch(r"(?=.*\d)[0-9a-zA-Z]{6,8}", w.text))
                 ]
                 current = {"date": d, "label": " ".join(label_words), "amount": value * sign,
                            "details": []}
@@ -189,7 +208,7 @@ def _parse_op_date(token: str, line: list[_Word], year_hint: int) -> Optional[da
             return date(int(m.group(3)), int(m.group(2)), int(m.group(1)))
         except ValueError:
             return None
-    m = _DATE_SHORT.match(token)
+    m = _DATE_SHORT.match(token) or _DATE_DM.match(token)
     if not m:
         return None
     day, month = int(m.group(1)), int(m.group(2))

@@ -49,7 +49,8 @@ _DAY_WINDOW = 5
 
 
 def normalize_label(label: str) -> str:
-    s = unicodedata.normalize("NFKD", label or "").encode("ascii", "ignore").decode().upper()
+    s = (label or "").replace("’", " ").replace("'", " ")  # « l’iban » ≠ « LIBAN »
+    s = unicodedata.normalize("NFKD", s).encode("ascii", "ignore").decode().upper()
     s = re.sub(r"[^A-Z0-9]+", " ", s)
     toks = [t for t in s.split() if not re.search(r"\d{3,}", t) and not t.isdigit() and t not in _MONTHS]
     return " ".join(toks)
@@ -454,8 +455,9 @@ def resolve(
         tol = _tolerance(amt, "0.10")
         db.add(MatchingRule(
             user_id=user.id, account_id=tx.account_id, pattern=pattern,
-            amount_min=None if rule_kind in ("ignore", "new_purchase") else amt - tol,
-            amount_max=None if rule_kind in ("ignore", "new_purchase") else amt + tol,
+            # Un abondement varie d'un mois à l'autre : seul le nom compte
+            amount_min=None if rule_kind in ("ignore", "new_purchase", "contribution") else amt - tol,
+            amount_max=None if rule_kind in ("ignore", "new_purchase", "contribution") else amt + tol,
             match_kind=rule_kind,
             match_id=None if rule_kind == "new_purchase" else target_id,
             contributor_user_id=contributor, category=category,
