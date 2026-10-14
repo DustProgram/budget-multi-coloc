@@ -21,9 +21,13 @@ Format interne (provider-agnostic) :
 """
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 import os
+import re
+import threading
+import time
 import uuid
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -398,8 +402,7 @@ def get_llm_client() -> LLMClient:
             cfg = {**cfg, "api_key": "ollama-local"}
         else:
             raise LLMError(
-                "Aucune clé API LLM configurée. Renseigne llm_api_key dans la "
-                "config de l'add-on (Paramètres > Add-on Budget > Configuration)."
+                "Aucune clé API LLM configurée : renseigne-la dans Réglages → Provider LLM."
             )
     adapter = cfg["adapter"]
     if adapter == "anthropic":
@@ -495,10 +498,31 @@ class OpenAIAdapter(LLMClient):
         kwargs = {"api_key": cfg["api_key"]}
         if cfg.get("base_url"):
             kwargs["base_url"] = cfg["base_url"]
+        self.provider = cfg.get("provider", "")
+        # Offre gratuite Mistral ≈ 1 requête/s : le chat enchaîne outil puis réponse
+        kwargs["max_retries"] = 5 if self.provider == "mistral" else 2
         self.client = OpenAI(**kwargs)
         self.model = cfg["model"]
 
+    def _create(self, **params):
+        if self.provider == "mistral":
+            _pace(MISTRAL_MIN_INTERVAL)
+        try:
+            return self.client.chat.completions.create(**params)
+        except Exception as e:
+            if getattr(e, "status_code", None) == 429:
+                raise LLMError(
+                    "Le provider IA limite le nombre de requêtes (429). Réessaie dans quelques secondes ; "
+                    "si ça persiste : quota de l'offre gratuite atteint, ou clé partagée avec un autre outil "
+                    "(Hermes…). Détail : " + str(e)
+                )
+            raise LLMError(f"Erreur de l'IA ({self.provider}) : {e}")
+
     def _to_openai_messages(self, system: str, messages: list[dict]) -> list[dict]:
+        out = self._to_openai_messages_raw(system, messages)
+        return _mistral_compat(out) if self.provider == "mistral" else out
+
+    def _to_openai_messages_raw(self, system: str, messages: list[dict]) -> list[dict]:
         """Traduit nos messages internes vers le format OpenAI Chat Completions."""
         out: list[dict] = [{"role": "system", "content": system}]
         for m in messages:
@@ -569,10 +593,7 @@ class OpenAIAdapter(LLMClient):
         }
         if tools:
             params["tools"] = self._to_openai_tools(tools)
-        try:
-            resp = self.client.chat.completions.create(**params)
-        except Exception as e:
-            raise LLMError(f"OpenAI error: {e}")
+        resp = self._create(**params)
         choice = resp.choices[0]
         text = (choice.message.content or "").strip() or None
         tool_calls = []
@@ -591,22 +612,19 @@ class OpenAIAdapter(LLMClient):
         )
 
     def vision(self, image_b64, mime_type, prompt, system, max_tokens=1024):
-        try:
-            resp = self.client.chat.completions.create(
-                model=self.model,
-                max_tokens=max_tokens,
-                messages=[
-                    {"role": "system", "content": system},
-                    {"role": "user", "content": [
-                        {"type": "text", "text": prompt},
-                        {"type": "image_url", "image_url": {
-                            "url": f"data:{mime_type};base64,{image_b64}",
-                        }},
-                    ]},
-                ],
-            )
-        except Exception as e:
-            raise LLMError(f"OpenAI vision error: {e}")
+        resp = self._create(
+            model=self.model,
+            max_tokens=max_tokens,
+            messages=[
+                {"role": "system", "content": system},
+                {"role": "user", "content": [
+                    {"type": "text", "text": prompt},
+                    {"type": "image_url", "image_url": {
+                        "url": f"data:{mime_type};base64,{image_b64}",
+                    }},
+                ]},
+            ],
+        )
         text = (resp.choices[0].message.content or "").strip()
         usage = getattr(resp, "usage", None)
         return VisionResult(
@@ -614,6 +632,51 @@ class OpenAIAdapter(LLMClient):
             input_tokens=getattr(usage, "prompt_tokens", 0) if usage else 0,
             output_tokens=getattr(usage, "completion_tokens", 0) if usage else 0,
         )
+
+
+MISTRAL_MIN_INTERVAL = 1.1
+_pace_lock = threading.Lock()
+_last_call = 0.0
+
+
+def _pace(min_interval: float) -> None:
+    global _last_call
+    with _pace_lock:
+        wait = _last_call + min_interval - time.monotonic()
+        if wait > 0:
+            time.sleep(wait)
+        _last_call = time.monotonic()
+
+
+def _mistral_id(raw: str) -> str:
+    if re.fullmatch(r"[A-Za-z0-9]{9}", raw or ""):
+        return raw
+    return hashlib.sha256((raw or "").encode()).hexdigest()[:9]
+
+
+def _mistral_compat(msgs: list[dict]) -> list[dict]:
+    """Mistral refuse un message user juste après un message tool, et des
+    identifiants d'appel d'outil autres que 9 caractères alphanumériques
+    (historique venant d'un autre provider)."""
+    names: dict[str, str] = {}
+    out: list[dict] = []
+    for m in msgs:
+        m = dict(m)
+        if m.get("tool_calls"):
+            calls = []
+            for c in m["tool_calls"]:
+                c = {**c, "id": _mistral_id(c["id"])}
+                names[c["id"]] = c["function"]["name"]
+                calls.append(c)
+            m["tool_calls"] = calls
+        if m["role"] == "tool":
+            m["tool_call_id"] = _mistral_id(m["tool_call_id"])
+            if m["tool_call_id"] in names:
+                m["name"] = names[m["tool_call_id"]]
+        if m["role"] == "user" and out and out[-1]["role"] == "tool":
+            out.append({"role": "assistant", "content": "(actions terminées)"})
+        out.append(m)
+    return out
 
 
 # ============================================================

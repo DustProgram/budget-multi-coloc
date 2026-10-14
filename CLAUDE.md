@@ -10,7 +10,7 @@ en mode `AUTH_MODE=standalone` (cf `deploy/README.md`). L'add-on Home Assistant 
 
 Passage en **standalone sur VPS** : `deploy/` (docker-compose app + Caddy HTTPS), `budget-app/Dockerfile.standalone`,
 image `ghcr.io/dustprogram/budget-multi-coloc-standalone` (workflow `build-standalone.yml`).
-Image HA toujours publiée sur `ghcr.io/dustprogram/budget-multi-coloc-{arch}`. Tests : **102/102 pytest verts**. `pip-audit` en CI.
+Image HA toujours publiée sur `ghcr.io/dustprogram/budget-multi-coloc-{arch}`. Tests : **105/105 pytest verts**. `pip-audit` en CI.
 Rapprochement relevés ↔ déclarations + page « À valider » + API agent Hermes/n8n livrés dans la même version → `docs/AUTOMATISATIONS.md`.
 Reste : synchro bancaire directe (agrégateur DSP2).
 
@@ -118,6 +118,7 @@ Reste : synchro bancaire directe (agrégateur DSP2).
 
 #### Services IA (mémoire détaillée : `project_llm_pluggable.md`)
 - `services/llm_client.py` : factory `get_llm_client()` + 3 adapters (Anthropic, OpenAI-compat, Gemini), 14 providers en presets
+- Mistral : appels espacés ≥1,1 s (offre gratuite ≈ 1 req/s) + 5 relances SDK sur 429, `_mistral_compat` (ids d'outil 9 car., `name` sur les messages tool, assistant inséré entre tool et user). `POST /api/settings/llm/test` (admin) = vrai appel avec les outils, renvoie l'erreur exacte ; `env_overrides` signale les `LLM_*` du .env qui priment sur l'UI
 - `services/ai_chat.py` + `services/ai_tools.py` : chat function calling, 11 outils
 - `services/ai_import.py` : Claude Vision (tickets/factures/relevés)
 - `services/bulk_import.py` : Excel/CSV multi-sheets, **100% local**
@@ -272,7 +273,7 @@ DEV_MODE=true LLM_API_KEY=... DATABASE_URL="sqlite:///./dev.db?check_same_thread
 # Dev frontend
 cd budget-app/frontend && npm run dev
 
-# Tests backend (102 actuellement)
+# Tests backend (105 actuellement)
 cd budget-app/backend && DEV_MODE=true DATABASE_URL="sqlite:///./test.db" .venv/bin/pytest tests/ -q
 
 # Build frontend

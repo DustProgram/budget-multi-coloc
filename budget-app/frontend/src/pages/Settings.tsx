@@ -1035,6 +1035,12 @@ interface LLMSettings {
   tpm_limit: number | null;
   rpd_limit: number | null;
   exclude_joint_charges_from_personal: boolean;
+  env_overrides?: string[];
+}
+
+interface LLMTest {
+  ok: boolean; provider: string; model: string; base_url: string | null;
+  reply?: string; error?: string; env_overrides: string[];
 }
 
 function LLMSettingsCard() {
@@ -1050,12 +1056,16 @@ function LLMSettingsCard() {
   const [form, setForm] = useState<Partial<LLMSettings & { api_key: string }>>({});
   const [showKey, setShowKey] = useState(false);
 
+  const test = useMutation({
+    mutationFn: async () => (await api.post<LLMTest>('/settings/llm/test')).data,
+  });
   const save = useMutation({
     mutationFn: async () => api.patch('/settings/llm', form),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['settings', 'llm'] });
       qc.invalidateQueries({ queryKey: ['chat', 'status'] });
       setForm({});
+      test.mutate();
     },
   });
 
@@ -1079,11 +1089,18 @@ function LLMSettingsCard() {
       <p className="small muted" style={{ marginTop: 0 }}>
         Surcharge la config.yaml de l'add-on, prend effet immédiatement. Laisse vide pour utiliser la valeur de l'add-on.
       </p>
+      {!!cur?.env_overrides?.length && (
+        <ErrorBox message={`Le fichier .env du serveur définit ${cur.env_overrides.join(', ')} : ces valeurs priment sur ce formulaire. Vide-les dans .env puis redémarre l'app (docker compose up -d) pour régler l'IA ici.`} />
+      )}
 
       <Field label="Provider">
         <Select
           value={selectedProvider}
-          onChange={(e) => setForm({ ...form, provider: e.target.value })}
+          // Modèle et URL d'un autre provider ne marcheraient pas : retour aux valeurs du preset
+          onChange={(e) => setForm({
+            ...form, provider: e.target.value,
+            ...(e.target.value !== 'custom' ? { model: '', base_url: '' } : {}),
+          })}
         >
           <option value="">— Utiliser la valeur de la config.yaml —</option>
           {provs.map((p) => (
@@ -1167,7 +1184,21 @@ function LLMSettingsCard() {
       {save.isError && (
         <ErrorBox message={save.error instanceof Error ? save.error.message : 'Erreur'} />
       )}
+      {test.data && (
+        <div className="small" style={{
+          padding: '10px 12px', borderRadius: 10, marginTop: 12, wordBreak: 'break-word',
+          background: test.data.ok ? 'var(--sage-bg)' : 'var(--rose-bg)',
+          color: test.data.ok ? undefined : 'var(--rose)',
+        }}>
+          <strong>{test.data.ok ? '✓ L\'IA répond' : '✗ L\'IA ne répond pas'}</strong>
+          {' '}({test.data.provider} · {test.data.model}{test.data.base_url ? ` · ${test.data.base_url}` : ''})
+          {test.data.error && <div style={{ marginTop: 6, fontFamily: 'var(--mono, monospace)' }}>{test.data.error}</div>}
+        </div>
+      )}
       <div className="row gap-2" style={{ marginTop: 12, justifyContent: 'flex-end' }}>
+        <Button onClick={() => test.mutate()} disabled={test.isPending}>
+          {test.isPending ? 'Test…' : 'Tester'}
+        </Button>
         <Button onClick={() => setForm({})}>Annuler</Button>
         <Button variant="primary" onClick={() => save.mutate()} disabled={save.isPending || Object.keys(form).length === 0}>
           {save.isPending ? 'Enregistrement…' : 'Enregistrer'}
