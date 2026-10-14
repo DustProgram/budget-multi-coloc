@@ -9,7 +9,7 @@ from sqlalchemy.orm import Session
 
 from models import Account, BankTransaction, MatchingRule, User
 from models.base import get_db
-from services import onboarding, reconciliation as rec
+from services import account_detect, onboarding, reconciliation as rec
 from services.access import accessible_account_ids, user_can_write_account
 from services.bank_import import parse_statement_with_meta
 from services.statement_parsers import StatementParseError
@@ -26,6 +26,9 @@ class ImportOut(BaseModel):
     closing_balance: Optional[Decimal] = None
     balance_verified: bool = False
     warnings: list[str] = []
+    account_id: Optional[int] = None
+    account_name: Optional[str] = None
+    account_detected: bool = False
 
 
 class OptionOut(BaseModel):
@@ -109,23 +112,39 @@ def apply_resolution(db: Session, user: User, tx: BankTransaction, payload: Reso
         raise HTTPException(422, str(e))
 
 
-def import_file(db: Session, user: User, account_id: int, filename: str, data: bytes) -> dict:
-    if not user_can_write_account(db, user.id, account_id):
-        raise HTTPException(403, "Pas le droit d'écrire sur ce compte.")
+def import_file(db: Session, user: User, account_id: Optional[int], filename: str, data: bytes) -> dict:
+    """Sans `account_id`, le compte est reconnu par le numéro lu sur le relevé."""
+    refs = account_detect.statement_refs(filename, data)
+    warning = None
+    if account_id:
+        account = db.get(Account, account_id)
+        if account is None or not user_can_write_account(db, user.id, account_id):
+            raise HTTPException(403, "Pas le droit d'écrire sur ce compte.")
+    else:
+        account = account_detect.find_account(db, user.id, refs)
+        if account is None:
+            raise HTTPException(422, {
+                "code": "account_unknown",
+                "detail": "Compte non reconnu : choisis-le une fois, il sera reconnu ensuite.",
+            })
     try:
         rows, source, meta = parse_statement_with_meta(db, user.id, filename, data)
     except StatementParseError as e:
         raise HTTPException(422, str(e))
-    out = rec.import_transactions(db, user, account_id, rows, source)
+    if account_id:
+        warning = account_detect.learn(db, account, refs)
+    out = rec.import_transactions(db, user, account.id, rows, source)
     out.update(opening_balance=meta.opening, closing_balance=meta.closing,
-               balance_verified=meta.verified, warnings=meta.warnings)
+               balance_verified=meta.verified,
+               warnings=meta.warnings + ([warning] if warning else []),
+               account_id=account.id, account_name=account.name, account_detected=not account_id)
     return out
 
 
 @router.post("/import", response_model=ImportOut)
 async def import_statement(
     request: Request,
-    account_id: int = Form(...),
+    account_id: Optional[int] = Form(None),
     file: UploadFile = File(...),
     db: Session = Depends(get_db),
 ):

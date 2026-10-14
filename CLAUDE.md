@@ -10,7 +10,7 @@ en mode `AUTH_MODE=standalone` (cf `deploy/README.md`). L'add-on Home Assistant 
 
 Passage en **standalone sur VPS** : `deploy/` (docker-compose app + Caddy HTTPS), `budget-app/Dockerfile.standalone`,
 image `ghcr.io/dustprogram/budget-multi-coloc-standalone` (workflow `build-standalone.yml`).
-Image HA toujours publiée sur `ghcr.io/dustprogram/budget-multi-coloc-{arch}`. Tests : **98/98 pytest verts**. `pip-audit` en CI.
+Image HA toujours publiée sur `ghcr.io/dustprogram/budget-multi-coloc-{arch}`. Tests : **102/102 pytest verts**. `pip-audit` en CI.
 Rapprochement relevés ↔ déclarations + page « À valider » + API agent Hermes/n8n livrés dans la même version → `docs/AUTOMATISATIONS.md`.
 Reste : synchro bancaire directe (agrégateur DSP2).
 
@@ -156,6 +156,7 @@ Reste : synchro bancaire directe (agrégateur DSP2).
 
 ### Relevés & rapprochement (0.12.0)
 - `BankTransaction` (dédup par `fingerprint` unique par compte), `MatchingRule` (tokens du libellé normalisé ⊂ libellé + fourchette montant), `ChannelLink`, `User.notify_channel`
+- Import en masse : `account_id` optionnel sur `/api/bank/import` et `/api/agent/statements` → compte reconnu par `Account.statement_ref` (n° de compte à 11 car. tiré de l'IBAN FR à clé valide, `<ACCTID>` OFX, « compte » + 11 chiffres en CSV), appris au premier import avec compte choisi (`services/account_detect.py`). Inconnu → 422 `code: account_unknown`
 - Ordre : achat existant ±4j → règle → déclarations du mois (1 seul candidat = auto, sinon `to_review`)
 - `joint_contributions` : si le relevé du joint est importé pour le mois, `actual` = crédits rapprochés à un membre (`from_bank=True`)
 - `/api/agent/*` : auth `AGENT_API_TOKEN` (hors middleware session), identité par `channel`+`handle` liés via code (in-memory 15 min) ou `username` (n8n)
@@ -271,7 +272,7 @@ DEV_MODE=true LLM_API_KEY=... DATABASE_URL="sqlite:///./dev.db?check_same_thread
 # Dev frontend
 cd budget-app/frontend && npm run dev
 
-# Tests backend (98 actuellement)
+# Tests backend (102 actuellement)
 cd budget-app/backend && DEV_MODE=true DATABASE_URL="sqlite:///./test.db" .venv/bin/pytest tests/ -q
 
 # Build frontend

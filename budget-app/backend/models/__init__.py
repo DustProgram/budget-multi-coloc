@@ -153,6 +153,8 @@ class Account(Base):
     # 'perso' (par défaut) ou 'pro' pour les comptes liés à l'activité professionnelle.
     # L'UI filtre via le switcher Perso/Pro quand pro_enabled est activé sur l'user.
     space = Column(String(8), default="perso", nullable=False, index=True)
+    # Numéro de compte (11 car.) lu sur un relevé : reconnaît le compte à l'import
+    statement_ref = Column(String(34), nullable=True)
 
     user = relationship("User", backref="accounts")
     members = relationship("AccountMember", back_populates="account", cascade="all, delete-orphan")

@@ -69,8 +69,9 @@ Quittance de loyer : `kind: "invoice"`. Si c'est une charge déjà déclarée, d
 
 ## Relevé bancaire (PDF Sumeria, CSV/OFX BRED…)
 
-`POST /api/agent/statements` avec `{"channel","handle","filename":"releve.pdf","content_b64":"…","account_id":<id>}`.
-Sans `account_id`, l'API répond 422 avec la liste des comptes : demande lequel.
+`POST /api/agent/statements` avec `{"channel","handle","filename":"releve.pdf","content_b64":"…"}`.
+Le compte est reconnu par l'IBAN du relevé (`account_name` dans la réponse). S'il est inconnu, l'API répond 422
+avec la liste des comptes : demande lequel et renvoie avec `account_id` (l'IBAN est alors retenu).
 Réponds ensuite avec le bilan (`imported`, `matched`, `to_review`) et propose de traiter les questions.
 
 ## « Combien il me reste ce mois ? »

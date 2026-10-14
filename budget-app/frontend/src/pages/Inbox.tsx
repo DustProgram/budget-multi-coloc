@@ -32,9 +32,14 @@ interface ImportResult {
   imported: number; duplicates: number; matched: number; to_review: number;
   opening_balance?: string | null; closing_balance?: string | null;
   balance_verified?: boolean; warnings?: string[];
+  account_name?: string | null; account_detected?: boolean;
 }
 
 interface FileResult extends ImportResult { name: string; error?: string }
+
+interface Unassigned { file: File; accountId: number | '' }
+
+const EMPTY_RESULT = { imported: 0, duplicates: 0, matched: 0, to_review: 0 };
 
 interface Suggestion {
   id: string;
@@ -80,6 +85,7 @@ function errDetail(e: unknown): string {
   const d = (e as { response?: { data?: { detail?: unknown } } }).response?.data?.detail;
   if (typeof d === 'string') return d;
   if (Array.isArray(d) && d[0]?.msg) return String(d[0].msg);
+  if (d && typeof d === 'object' && 'detail' in d) return String((d as { detail: unknown }).detail);
   return e instanceof Error ? e.message : 'Erreur';
 }
 
@@ -132,76 +138,138 @@ export function Inbox() {
   );
 }
 
+function errCode(e: unknown): string | undefined {
+  const d = (e as { response?: { data?: { detail?: { code?: string } } } }).response?.data?.detail;
+  return typeof d === 'object' && d ? d.code : undefined;
+}
+
+async function importOne(file: File, accountId: number | null): Promise<FileResult> {
+  const fd = new FormData();
+  if (accountId != null) fd.append('account_id', String(accountId));
+  fd.append('file', file);
+  return { name: file.name, ...(await api.post<ImportResult>('/bank/import', fd)).data };
+}
+
 function ImportCard({ onDone }: { onDone: () => void }) {
   const accounts = useSpaceAccounts();
-  const [accountId, setAccountId] = useState<number | ''>('');
+  const [accountId, setAccountId] = useState<number | 'auto'>('auto');
   const [files, setFiles] = useState<File[]>([]);
   const [results, setResults] = useState<FileResult[] | null>(null);
-
-  useEffect(() => {
-    if (accountId === '' && accounts.data?.length) setAccountId(accounts.data[0].id);
-  }, [accounts.data, accountId]);
+  const [unassigned, setUnassigned] = useState<Unassigned[]>([]);
+  const [dragging, setDragging] = useState(false);
 
   const upload = useMutation({
-    mutationFn: async () => {
+    mutationFn: async (batch: { file: File; accountId: number | null }[]) => {
       const out: FileResult[] = [];
-      for (const f of files) {
-        const fd = new FormData();
-        fd.append('account_id', String(accountId));
-        fd.append('file', f);
+      const unknown: Unassigned[] = [];
+      for (const { file, accountId: acc } of batch) {
         try {
-          out.push({ name: f.name, ...(await api.post<ImportResult>('/bank/import', fd)).data });
+          out.push(await importOne(file, acc));
         } catch (e) {
-          out.push({ name: f.name, imported: 0, duplicates: 0, matched: 0, to_review: 0, error: errDetail(e) });
+          if (errCode(e) === 'account_unknown') unknown.push({ file, accountId: '' });
+          else out.push({ name: file.name, ...EMPTY_RESULT, error: errDetail(e) });
         }
       }
-      return out;
+      return { out, unknown };
     },
-    onSuccess: (r) => { setResults(r); setFiles([]); onDone(); },
+    onSuccess: ({ out, unknown }) => {
+      setResults((prev) => [...(prev ?? []), ...out]);
+      setUnassigned(unknown);
+      setFiles([]);
+      onDone();
+    },
   });
+
+  const start = (picked: File[]) => {
+    setResults(null);
+    upload.mutate(picked.map((file) => ({ file, accountId: accountId === 'auto' ? null : accountId })));
+  };
+
+  // Les relevés choisis d'abord : leur IBAN est alors appris, et les autres du même compte sont reconnus
+  const assignAll = () => upload.mutate([
+    ...unassigned.filter((u) => u.accountId !== '').map((u) => ({ file: u.file, accountId: u.accountId as number })),
+    ...unassigned.filter((u) => u.accountId === '').map((u) => ({ file: u.file, accountId: null })),
+  ]);
 
   return (
     <Card>
-      <div className="row gap-2" style={{ alignItems: 'center', marginBottom: 4 }}>
-        <Upload size={16} style={{ color: 'var(--ink-2)' }} />
-        <p className="eyebrow" style={{ margin: 0 }}>Importer des relevés</p>
+      <div
+        onDragOver={(e) => { e.preventDefault(); setDragging(true); }}
+        onDragLeave={() => setDragging(false)}
+        onDrop={(e) => {
+          e.preventDefault(); setDragging(false);
+          const dropped = Array.from(e.dataTransfer.files);
+          if (dropped.length) setFiles(dropped);
+        }}
+        style={dragging ? { outline: '2px dashed var(--terra)', outlineOffset: 6, borderRadius: 12 } : undefined}
+      >
+        <div className="row gap-2" style={{ alignItems: 'center', marginBottom: 4 }}>
+          <Upload size={16} style={{ color: 'var(--ink-2)' }} />
+          <p className="eyebrow" style={{ margin: 0 }}>Importer des relevés</p>
+        </div>
+        <p className="small muted" style={{ marginTop: 6 }}>
+          Dépose tous tes relevés d'un coup, tous comptes et tous mois confondus : chacun part sur son compte
+          grâce à l'IBAN imprimé dessus. La première fois, l'app te demande à quel compte correspond chaque IBAN.
+          Réimporter un relevé ne crée pas de doublon.
+        </p>
+        <form onSubmit={(e) => { e.preventDefault(); start(files); }}>
+          <Field label="Compte">
+            <Select value={accountId} onChange={(e) => setAccountId(e.target.value === 'auto' ? 'auto' : Number(e.target.value))}>
+              <option value="auto">Reconnaître automatiquement</option>
+              {accounts.data?.map((a) => <option key={a.id} value={a.id}>{a.name} — {a.bank}</option>)}
+            </Select>
+          </Field>
+          <Field label={files.length ? `${files.length} fichier(s) prêt(s)` : 'Fichiers (ou glisse-les ici)'}>
+            <Input type="file" multiple accept=".csv,.ofx,.qfx,.pdf,.txt,image/*"
+              onChange={(e) => setFiles(Array.from(e.target.files ?? []))} />
+          </Field>
+
+          {unassigned.length > 0 && (
+            <div style={{ padding: 12, borderRadius: 10, marginBottom: 12, background: 'var(--bg-2)' }}>
+              <p className="small" style={{ marginTop: 0 }}>
+                <strong>Compte non reconnu.</strong> Choisis le compte d'<em>un</em> relevé par compte :
+                les autres relevés du même compte suivront, et les prochains seront reconnus tout seuls.
+              </p>
+              {unassigned.map((u, i) => (
+                <div key={u.file.name + i} className="row gap-2" style={{ alignItems: 'center', marginBottom: 8, flexWrap: 'wrap' }}>
+                  <span className="small" style={{ flex: '1 1 160px', wordBreak: 'break-all' }}>{u.file.name}</span>
+                  <Select style={{ flex: '1 1 180px' }} value={u.accountId}
+                    onChange={(e) => setUnassigned((prev) => prev.map((x, j) => j === i ? { ...x, accountId: Number(e.target.value) } : x))}>
+                    <option value="">Choisir…</option>
+                    {accounts.data?.map((a) => <option key={a.id} value={a.id}>{a.name} — {a.bank}</option>)}
+                  </Select>
+                </div>
+              ))}
+              <Button type="button" variant="primary" onClick={assignAll}
+                disabled={upload.isPending || unassigned.every((u) => u.accountId === '')}>
+                <Upload size={14} /> Importer sur ces comptes
+              </Button>
+            </div>
+          )}
+
+          {results?.map((r, i) => (
+            <div key={r.name + i} className="small" style={{
+              padding: '8px 12px', borderRadius: 10, marginBottom: 8,
+              background: r.error ? 'var(--rose-bg)' : 'var(--sage-bg)',
+              color: r.error ? 'var(--rose)' : undefined,
+            }}>
+              <strong>{r.name}</strong>{r.account_name && <> → {r.account_name}</>} — {r.error ?? (
+                <>
+                  {r.imported} importée(s) · {r.matched} rapprochée(s) · <strong>{r.to_review} à trier</strong>
+                  {r.duplicates > 0 && ` · ${r.duplicates} déjà connue(s)`}
+                  {r.closing_balance != null && (
+                    <> · solde fin {eur(r.closing_balance)} {r.balance_verified ? '✓ vérifié' : '(non vérifié)'}</>
+                  )}
+                  {r.warnings?.map((w) => <div key={w} style={{ color: 'var(--amber, #b45309)' }}>⚠ {w}</div>)}
+                </>
+              )}
+            </div>
+          ))}
+          <Button type="submit" variant="primary" disabled={!files.length || upload.isPending}>
+            <Upload size={14} /> {upload.isPending ? 'Analyse…' : files.length > 1 ? `Importer ${files.length} fichiers` : 'Importer'}
+          </Button>
+        </form>
       </div>
-      <p className="small muted" style={{ marginTop: 6 }}>
-        PDF (BRED, BoursoBank… lus sans IA et vérifiés au centime), CSV, OFX, ou photo.
-        Tu peux en sélectionner plusieurs d'un coup. Réimporter un relevé ne crée pas de doublon.
-      </p>
-      <form onSubmit={(e) => { e.preventDefault(); setResults(null); upload.mutate(); }}>
-        <Field label="Compte">
-          <Select value={accountId} onChange={(e) => setAccountId(Number(e.target.value))} required>
-            {accounts.data?.map((a) => <option key={a.id} value={a.id}>{a.name} — {a.bank}</option>)}
-          </Select>
-        </Field>
-        <Field label="Fichiers">
-          <Input type="file" multiple accept=".csv,.ofx,.qfx,.pdf,.txt,image/*"
-            onChange={(e) => setFiles(Array.from(e.target.files ?? []))} required />
-        </Field>
-        {results?.map((r) => (
-          <div key={r.name} className="small" style={{
-            padding: '8px 12px', borderRadius: 10, marginBottom: 8,
-            background: r.error ? 'var(--rose-bg)' : 'var(--sage-bg)',
-            color: r.error ? 'var(--rose)' : undefined,
-          }}>
-            <strong>{r.name}</strong> — {r.error ?? (
-              <>
-                {r.imported} importée(s) · {r.matched} rapprochée(s) · <strong>{r.to_review} à trier</strong>
-                {r.duplicates > 0 && ` · ${r.duplicates} déjà connue(s)`}
-                {r.closing_balance != null && (
-                  <> · solde fin {eur(r.closing_balance)} {r.balance_verified ? '✓ vérifié' : '(non vérifié)'}</>
-                )}
-                {r.warnings?.map((w) => <div key={w} style={{ color: 'var(--amber, #b45309)' }}>⚠ {w}</div>)}
-              </>
-            )}
-          </div>
-        ))}
-        <Button type="submit" variant="primary" disabled={!files.length || accountId === '' || upload.isPending}>
-          <Upload size={14} /> {upload.isPending ? 'Analyse…' : files.length > 1 ? `Importer ${files.length} fichiers` : 'Importer'}
-        </Button>
-      </form>
     </Card>
   );
 }

@@ -75,6 +75,7 @@ def init_db():
     _migrate_add_column_if_missing("users", "totp_secret", "VARCHAR(64)")
     _migrate_add_column_if_missing("users", "totp_enabled", "BOOLEAN DEFAULT 0 NOT NULL")
     _migrate_add_column_if_missing("users", "totp_last_step", "INTEGER DEFAULT 0 NOT NULL")
+    _migrate_add_column_if_missing("accounts", "statement_ref", "VARCHAR(34)")
     _migrate_add_column_if_missing("accounts", "space", "VARCHAR(8) DEFAULT 'perso' NOT NULL")
     _create_index_if_missing("ix_accounts_space", "accounts", "space")
     # household_id sur messages (nullable, ancien chat par compte conservé)

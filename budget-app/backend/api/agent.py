@@ -214,12 +214,15 @@ def _decode_b64(raw: str) -> bytes:
 @router.post("/statements", dependencies=[Depends(require_agent)])
 async def agent_import_statement(payload: FileIn, db: Session = Depends(get_db)):
     user = resolve_actor(db, payload)
-    if not payload.account_id:
-        raise HTTPException(422, {
-            "detail": "Sur quel compte est ce relevé ? Repasse account_id.",
-            "accounts": _accounts_out(db, user),
-        })
-    return import_file(db, user, payload.account_id, payload.filename, _decode_b64(payload.content_b64))
+    try:
+        return import_file(db, user, payload.account_id, payload.filename, _decode_b64(payload.content_b64))
+    except HTTPException as e:
+        if isinstance(e.detail, dict) and e.detail.get("code") == "account_unknown":
+            raise HTTPException(422, {
+                "detail": "Sur quel compte est ce relevé ? Repasse account_id (il sera reconnu ensuite).",
+                "accounts": _accounts_out(db, user),
+            })
+        raise
 
 
 class DocumentIn(Who):
