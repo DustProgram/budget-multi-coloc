@@ -82,6 +82,7 @@ export function Settings() {
           <HouseholdCard />
           <ExternalAccountCard me={me.data} standalone={standalone}
             onChanged={() => qc.invalidateQueries({ queryKey: ['me'] })} />
+          <ChannelsCard />
           <ProCard me={me.data} onChanged={() => qc.invalidateQueries({ queryKey: ['me'] })} />
           {!standalone && <NotifCard available={notifier.data?.ha_available ?? false} />}
           <CategoryBudgetsCard />
@@ -512,6 +513,112 @@ function NotifCard({ available }: { available: boolean }) {
           {testNotif.isPending ? 'Envoi…' : 'Tester une notif'}
         </Button>
       </div>
+    </Card>
+  );
+}
+
+// ============================================================
+// Canaux de notification (questions de rapprochement via l'agent)
+// ============================================================
+
+interface ChannelsOut {
+  notify_channel: string;
+  links: { id: number; channel: string; handle: string }[];
+  available: string[];
+  agent_enabled: boolean;
+}
+
+const CHANNEL_LABEL: Record<string, string> = {
+  app: "Dans l'app uniquement", discord: 'Discord', imessage: 'iMessage',
+  whatsapp: 'WhatsApp', telegram: 'Telegram', signal: 'Signal',
+};
+
+function ChannelsCard() {
+  const qc = useQueryClient();
+  const channels = useQuery({
+    queryKey: ['channels'],
+    queryFn: async () => (await api.get<ChannelsOut>('/channels/')).data,
+  });
+  const [linkChannel, setLinkChannel] = useState('discord');
+  const [code, setCode] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const update = (d: ChannelsOut) => qc.setQueryData(['channels'], d);
+
+  const pref = useMutation({
+    mutationFn: async (channel: string) => (await api.put<ChannelsOut>('/channels/preference', { channel })).data,
+    onSuccess: update,
+    onError: (e) => setError(errDetail(e)),
+  });
+  const genCode = useMutation({
+    mutationFn: async () => (await api.post<{ code: string }>('/channels/link-code', { channel: linkChannel })).data,
+    onSuccess: (d) => setCode(d.code),
+  });
+  const unlink = useMutation({
+    mutationFn: async (id: number) => (await api.delete<ChannelsOut>(`/channels/links/${id}`)).data,
+    onSuccess: update,
+  });
+  const d = channels.data;
+  const linked = Array.from(new Set(d?.links.map((l) => l.channel) ?? []));
+
+  return (
+    <Card>
+      <div className="row gap-2" style={{ alignItems: 'center', marginBottom: 4 }}>
+        <Bell size={16} style={{ color: 'var(--ink-2)' }} />
+        <p className="eyebrow" style={{ margin: 0 }}>Notifications</p>
+      </div>
+      <h3 style={{ fontFamily: 'var(--display)', fontSize: 22, margin: '4px 0 8px' }}>
+        Où recevoir mes questions
+      </h3>
+      <p className="small muted">
+        Quand une opération de <strong>tes comptes perso</strong> ne colle à aucune déclaration,
+        l'assistant te la pose sur ce canal. Celles des comptes joints restent dans
+        l'app (page « À valider »), elles concernent tout le foyer.
+      </p>
+      {d && !d.agent_enabled && (
+        <p className="small" style={{ color: 'var(--ink-3)' }}>
+          Agent non configuré sur le serveur (AGENT_API_TOKEN) : seule l'app est disponible.
+        </p>
+      )}
+      {d && (
+        <>
+          <Field label="Canal préféré">
+            <Select value={d.notify_channel} onChange={(e) => { setError(null); pref.mutate(e.target.value); }}>
+              <option value="app">{CHANNEL_LABEL.app}</option>
+              {linked.map((c) => <option key={c} value={c}>{CHANNEL_LABEL[c] ?? c}</option>)}
+            </Select>
+          </Field>
+          {d.links.map((l) => (
+            <div key={l.id} className="row between small" style={{
+              alignItems: 'center', padding: '8px 10px', borderRadius: 8, background: 'var(--bg-sunken)', marginBottom: 6,
+            }}>
+              <span>{CHANNEL_LABEL[l.channel] ?? l.channel} · <code>{l.handle}</code></span>
+              <Button variant="ghost" onClick={() => unlink.mutate(l.id)} aria-label="Délier"><Trash2 size={12} /></Button>
+            </div>
+          ))}
+          {d.agent_enabled && (
+            <div style={{ marginTop: 10 }}>
+              <Field label="Lier une messagerie">
+                <div className="row gap-2" style={{ alignItems: 'center' }}>
+                  <Select value={linkChannel} onChange={(e) => { setLinkChannel(e.target.value); setCode(null); }}>
+                    {d.available.map((c) => <option key={c} value={c}>{CHANNEL_LABEL[c] ?? c}</option>)}
+                  </Select>
+                  <Button onClick={() => genCode.mutate()} disabled={genCode.isPending}>Obtenir un code</Button>
+                </div>
+              </Field>
+              {code && (
+                <div className="small" style={{ padding: '10px 12px', borderRadius: 10, background: 'var(--sage-bg)' }}>
+                  Envoie <code style={{ fontSize: 14 }}>lier {code}</code> à l'assistant depuis ton
+                  compte {CHANNEL_LABEL[linkChannel]}. Code valable 15 minutes.
+                  <Button variant="ghost" onClick={() => qc.invalidateQueries({ queryKey: ['channels'] })}>
+                    <RefreshCw size={12} /> J'ai envoyé
+                  </Button>
+                </div>
+              )}
+            </div>
+          )}
+          {error && <ErrorBox message={error} />}
+        </>
+      )}
     </Card>
   );
 }

@@ -15,6 +15,7 @@ interface ContributionRow {
   expected: string;
   actual: string;
   balance: string;
+  from_bank?: boolean;
 }
 
 const MONTHS = ['Janvier','Février','Mars','Avril','Mai','Juin','Juillet','Août','Septembre','Octobre','Novembre','Décembre'];
@@ -131,7 +132,9 @@ function JointContributionsCard({
                 <tr key={c.user_id}>
                   <td><strong>{c.user_name}</strong></td>
                   <td className="r num small">{eur(c.expected)}</td>
-                  <td className="r num small">{eur(c.actual)}</td>
+                  <td className="r num small" title={c.from_bank ? 'Versé réellement (relevé importé)' : 'Selon les virements déclarés'}>
+                    {eur(c.actual)}{c.from_bank && <span className="pill sage" style={{ marginLeft: 6 }}>relevé</span>}
+                  </td>
                   <td className={`r num display ${bal >= 0 ? 'pos' : 'neg'}`}
                     style={{ fontSize: 15 }}>
                     {bal >= 0 ? '+' : ''}{eur(bal)}

@@ -27,6 +27,9 @@ from api import (
     settings_llm as settings_llm_api,
     export as export_api,
     category_budgets as category_budgets_api,
+    bank as bank_api,
+    channels as channels_api,
+    agent as agent_api,
 )
 from models.base import init_db
 from services.backup import perform_monthly_backup
@@ -131,6 +134,9 @@ app.include_router(bulk_import_api.router, prefix="/api/bulk-import", tags=["bul
 app.include_router(settings_llm_api.router, prefix="/api/settings", tags=["settings"])
 app.include_router(export_api.router, prefix="/api/export", tags=["export"])
 app.include_router(category_budgets_api.router, prefix="/api/category-budgets", tags=["category-budgets"])
+app.include_router(bank_api.router, prefix="/api/bank", tags=["bank"])
+app.include_router(channels_api.router, prefix="/api/channels", tags=["channels"])
+app.include_router(agent_api.router, prefix="/api/agent", tags=["agent"])
 
 # ===== Frontend statique (PWA) =====
 static_dir = Path(os.environ.get("STATIC_DIR", "/app/static"))

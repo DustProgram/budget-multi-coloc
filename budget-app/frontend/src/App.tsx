@@ -27,6 +27,7 @@ const ComptaPro = lazy(() => import('./pages/ComptaPro').then((m) => ({ default:
 const Chat = lazy(() => import('./pages/Chat').then((m) => ({ default: m.Chat })));
 const Events = lazy(() => import('./pages/Events').then((m) => ({ default: m.Events })));
 const ImportPage = lazy(() => import('./pages/Import').then((m) => ({ default: m.Import })));
+const Inbox = lazy(() => import('./pages/Inbox').then((m) => ({ default: m.Inbox })));
 const BulkImportPage = lazy(() => import('./pages/BulkImport').then((m) => ({ default: m.BulkImport })));
 
 const queryClient = new QueryClient({
@@ -121,6 +122,9 @@ export default function App() {
               } />
               <Route path="bulk-import" element={
                 <Suspense fallback={<PageFallback />}><BulkImportPage /></Suspense>
+              } />
+              <Route path="inbox" element={
+                <Suspense fallback={<PageFallback />}><Inbox /></Suspense>
               } />
               <Route path="events" element={
                 <Suspense fallback={<PageFallback />}><Events /></Suspense>

@@ -1,6 +1,18 @@
 # Automatisations : relevés, tickets, quittances (proposition)
 
-Statut : **proposition, rien d'implémenté**. Ce doc sert à valider l'approche avant de coder.
+Statut (0.12.0) : **étapes 2 à 4 livrées** : rapprochement, page « À valider », API agent, skill Hermes,
+guide n8n. La synchro bancaire directe (étape 5) reste à faire.
+
+Ce qui a été décidé avec l'utilisateur :
+- Banques : **BRED** (chacun, export CSV/OFX) et **Sumeria** pour le compte commun (relevés PDF → IA).
+  D'autres banques à côté pour certains (CSV/OFX/PDF génériques).
+- Agent : **Hermes Agent** (Nous Research), déjà branché sur Discord et iMessage.
+- Questions : **dans l'app pour tout le monde**. En plus, chaque personne peut recevoir les questions
+  de **ses comptes perso** sur son canal (Réglages → Notifications). Les comptes joints restent dans l'app.
+
+Code : `services/reconciliation.py` (moteur), `services/statement_parsers.py` + `services/bank_import.py`
+(lecture), `api/bank.py` (app), `api/agent.py` + `api/channels.py` (agent), `pages/Inbox.tsx`,
+`integrations/hermes/budget-coloc/SKILL.md`, `integrations/n8n/README.md`.
 
 ## Principe : le déclaratif d'abord, l'IA ensuite
 
@@ -84,16 +96,32 @@ qui envoie les questions groupées sur Telegram.
 
 ## Ordre proposé
 
-1. ✅ **Déploiement VPS sécurisé** (ce qui vient d'être fait, cf `deploy/README.md`)
-2. Tables + moteur de rapprochement + import CSV/OFX + page « À valider » (utilisable sans IA ni n8n)
-3. Tokens `ingest` + endpoints d'ingestion + flux n8n Drive
-4. Hermes : outils MCP + questions sur Telegram
+1. ✅ **Déploiement VPS sécurisé** (cf `deploy/README.md`)
+2. ✅ Tables + moteur de rapprochement + import CSV/OFX/PDF + page « À valider »
+3. ✅ API agent (`AGENT_API_TOKEN`) + guide n8n Drive
+4. ✅ Skill Hermes : liaison, questions groupées, réponses, tickets, relevés, résumé
 5. Synchro bancaire directe (si l'étape 3 ne suffit pas)
 
-## Questions ouvertes
+Écart avec la proposition initiale : un seul token agent (et pas un token `ingest` par utilisateur),
+car Hermes sert plusieurs personnes. Le cloisonnement se fait par l'identité liée de l'expéditeur.
+Ce token ne donne accès qu'à `/api/agent/*`.
 
-- Hermes = **Hermes Agent de Nous Research** (agent auto-hébergé avec Telegram et MCP), ou un modèle Hermes
-  servi en local ? Ça change la façon de brancher les outils.
-- Quelles banques (pour vérifier les formats d'export CSV/OFX et la couverture de l'agrégateur) ?
-- Canal pour les questions : Telegram, WhatsApp, Discord, ou seulement la page « À valider » ?
-- Les colocs utiliseront-ils aussi le dépôt Drive, ou seulement toi au début ?
+## Plusieurs utilisateurs sur un même Hermes
+
+L'app sait **qui parle** grâce à la liaison par code : chaque personne génère un code dans
+Réglages → Notifications et l'envoie à Hermes depuis **sa** messagerie (« lier 123456 »). Hermes transmet
+l'identifiant d'expéditeur qu'il voit réellement (id Discord, numéro iMessage…). Personne ne peut donc
+s'attribuer le Discord d'un autre. Ensuite, chaque appel de Hermes porte le canal et l'identifiant de
+l'expéditeur, et l'app n'agit que sur les comptes de cette personne.
+
+Une personne peut lier plusieurs canaux (Discord **et** iMessage) et choisir celui où elle veut les questions.
+
+**Lire la messagerie de chacun** (scanner les conversations pour y trouver des dépenses) : déconseillé.
+Ça demanderait à Hermes un accès à des conversations privées qui n'ont rien à voir avec le budget, et
+WhatsApp n'a pas d'API officielle pour ça (les passerelles non officielles risquent le bannissement du numéro).
+Le modèle retenu est plus simple et plus sûr : on **écrit ou transfère** à Hermes (photo de ticket,
+PDF de relevé, quittance), et il répond aux questions qu'on lui pose.
+
+iMessage ne fonctionne que si Hermes tourne sur un Mac. Dans ce cas, Hermes appelle l'app via
+`https://budget.mondomaine.fr/api/agent/...` (protégé par `AGENT_API_TOKEN`). Si Hermes tourne sur le VPS,
+il peut utiliser `http://app:8000` en interne.

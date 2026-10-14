@@ -70,6 +70,7 @@ def init_db():
     _migrate_add_column_if_missing("users", "external_token", "TEXT")
     _create_index_if_missing("ix_users_external_token", "users", "external_token", unique=True)
     _migrate_add_column_if_missing("users", "pro_enabled", "BOOLEAN DEFAULT 0")
+    _migrate_add_column_if_missing("users", "notify_channel", "VARCHAR(16) DEFAULT 'app' NOT NULL")
     _migrate_add_column_if_missing("accounts", "space", "VARCHAR(8) DEFAULT 'perso' NOT NULL")
     _create_index_if_missing("ix_accounts_space", "accounts", "space")
     # household_id sur messages (nullable, ancien chat par compte conservé)

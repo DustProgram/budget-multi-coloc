@@ -8,7 +8,7 @@ from enum import Enum
 
 from sqlalchemy import (
     Boolean, Column, Date, DateTime, Enum as SQLEnum, ForeignKey,
-    Integer, Numeric, String, Text, Index,
+    Integer, Numeric, String, Text, Index, UniqueConstraint,
 )
 from sqlalchemy.orm import relationship
 
@@ -122,6 +122,9 @@ class User(Base):
     # Quand True, l'UI affiche le switcher Perso/Pro et la rubrique Compta-pro.
     # Utilisable pour micro-entrepreneur / freelance qui veut un suivi séparé.
     pro_enabled = Column(Boolean, default=False)
+    # Canal où recevoir les questions de rapprochement : 'app' ou un canal
+    # lié via ChannelLink (discord, imessage, whatsapp, telegram).
+    notify_channel = Column(String(16), default="app", nullable=False)
 
 
 # ============================================================
@@ -666,3 +669,78 @@ class LLMUsage(Base):
     input_tokens = Column(Integer, default=0, nullable=False)
     output_tokens = Column(Integer, default=0, nullable=False)
     kind = Column(String(20), default="chat", nullable=False)  # 'chat' | 'vision'
+
+
+# ============================================================
+# Relevés bancaires réels + rapprochement avec les déclarations
+# ============================================================
+
+class BankTransaction(Base):
+    """Ligne de relevé importée (CSV/OFX/PDF/agent).
+
+    `match_kind` + `match_id` pointent vers la déclaration rapprochée :
+    charge | income | recurring_transfer | onetime_transfer | saving |
+    purchase | contribution | ignore. Pour une 'contribution' (abondement
+    d'un compte joint), `contributor_user_id` dit qui a versé.
+    """
+    __tablename__ = "bank_transactions"
+
+    id = Column(Integer, primary_key=True)
+    account_id = Column(Integer, ForeignKey("accounts.id", ondelete="CASCADE"), nullable=False, index=True)
+    imported_by_user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    date = Column(Date, nullable=False, index=True)
+    amount = Column(Numeric(12, 2), nullable=False)  # signé : < 0 = sortie
+    label = Column(String(256), nullable=False)
+    source = Column(String(16), nullable=False)  # csv | ofx | pdf | image | api
+    fingerprint = Column(String(64), nullable=False)
+    status = Column(String(16), default="to_review", nullable=False, index=True)
+    match_kind = Column(String(24), nullable=True)
+    match_id = Column(Integer, nullable=True)
+    contributor_user_id = Column(Integer, ForeignKey("users.id"), nullable=True)
+    rule_id = Column(Integer, ForeignKey("matching_rules.id", ondelete="SET NULL"), nullable=True)
+    notified_at = Column(DateTime, nullable=True)
+    resolved_by_user_id = Column(Integer, ForeignKey("users.id"), nullable=True)
+    resolved_at = Column(DateTime, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    account = relationship("Account")
+
+    __table_args__ = (
+        UniqueConstraint("account_id", "fingerprint", name="uq_bank_tx_fingerprint"),
+        Index("ix_bank_tx_account_date", "account_id", "date"),
+    )
+
+
+class MatchingRule(Base):
+    """Règle apprise d'une validation : tous les tokens de `pattern` présents
+    dans le libellé normalisé (+ montant dans la fourchette) → même rapprochement."""
+    __tablename__ = "matching_rules"
+
+    id = Column(Integer, primary_key=True)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    account_id = Column(Integer, ForeignKey("accounts.id", ondelete="CASCADE"), nullable=True)
+    pattern = Column(String(128), nullable=False)
+    amount_min = Column(Numeric(12, 2), nullable=True)
+    amount_max = Column(Numeric(12, 2), nullable=True)
+    match_kind = Column(String(24), nullable=False)
+    match_id = Column(Integer, nullable=True)
+    contributor_user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=True)
+    category = Column(String(64), nullable=True)
+    hits = Column(Integer, default=0, nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+
+class ChannelLink(Base):
+    """Identité d'un user sur une messagerie (Discord, iMessage…), liée via
+    un code à usage unique envoyé à l'agent. Sert à savoir qui parle à Hermes."""
+    __tablename__ = "channel_links"
+
+    id = Column(Integer, primary_key=True)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    channel = Column(String(16), nullable=False)
+    handle = Column(String(128), nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    __table_args__ = (
+        UniqueConstraint("channel", "handle", name="uq_channel_handle"),
+    )

@@ -320,6 +320,7 @@ class ContributionOut(BaseModel):
     expected: Decimal
     actual: Decimal
     balance: Decimal
+    from_bank: bool = False
 
 
 @router.get("/{account_id}/contributions", response_model=list[ContributionOut])
@@ -347,6 +348,7 @@ async def get_contributions(
         ContributionOut(
             user_id=r.user_id, user_name=r.user_name,
             expected=r.expected, actual=r.actual, balance=r.balance,
+            from_bank=r.from_bank,
         )
         for r in rows
     ]

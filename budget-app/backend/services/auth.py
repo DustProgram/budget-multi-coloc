@@ -36,6 +36,7 @@ PUBLIC_PATHS_PREFIX = (
     "/api/openapi.json",
     "/api/auth/login",
     "/api/auth/logout",
+    "/api/agent",  # auth par AGENT_API_TOKEN dans le router (api/agent.py)
 )
 PUBLIC_PATHS = set(PUBLIC_PATHS_PREFIX)
 
