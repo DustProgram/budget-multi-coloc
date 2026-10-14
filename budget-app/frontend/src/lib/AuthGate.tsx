@@ -1,7 +1,7 @@
 import { useEffect, useState, type ReactNode } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from './api';
-import { isExternalContext, hasLoggedFlag, clearLoggedFlag } from './external-auth';
+import { isExternalContext, hasLoggedFlag, clearLoggedFlag, clearApiCache } from './external-auth';
 import { ExternalLogin } from '../pages/ExternalLogin';
 
 export function AuthGate({ children }: { children: ReactNode }) {
@@ -33,9 +33,10 @@ export function AuthGate({ children }: { children: ReactNode }) {
   if (showLogin || me.isError) {
     return (
       <ExternalLogin
-        onAuthed={() => {
+        onAuthed={async () => {
+          await clearApiCache();
+          qc.clear();
           setShowLogin(false);
-          qc.invalidateQueries();
         }}
       />
     );
@@ -56,21 +57,25 @@ export function AuthGate({ children }: { children: ReactNode }) {
   return (
     <>
       {children}
-      <ExternalSessionBadge onLogout={async () => {
-        try { await api.post('/auth/logout/'); } catch {}
-        clearLoggedFlag();
-        setShowLogin(true);
-        qc.invalidateQueries();
-      }} />
+      <ExternalSessionBadge
+        label={me.data?.auth_mode === 'standalone' ? 'Déconnexion' : 'Session externe — déconnexion'}
+        onLogout={async () => {
+          try { await api.post('/auth/logout/'); } catch {}
+          clearLoggedFlag();
+          await clearApiCache();
+          qc.clear();
+          setShowLogin(true);
+        }}
+      />
     </>
   );
 }
 
-function ExternalSessionBadge({ onLogout }: { onLogout: () => void }) {
+function ExternalSessionBadge({ label, onLogout }: { label: string; onLogout: () => void }) {
   return (
     <button
       onClick={onLogout}
-      title="Se déconnecter (session externe)"
+      title="Se déconnecter"
       style={{
         position: 'fixed', top: 12, right: 12, zIndex: 5,
         background: 'var(--amber-bg, oklch(0.94 0.04 80))',
@@ -81,7 +86,7 @@ function ExternalSessionBadge({ onLogout }: { onLogout: () => void }) {
         fontFamily: 'inherit',
       }}
     >
-      Session externe — déconnexion
+      {label}
     </button>
   );
 }

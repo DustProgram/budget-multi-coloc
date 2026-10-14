@@ -26,6 +26,7 @@ from models import ExternalScope, User
 from services.external_auth import (
     COOKIE_NAME, read_session_cookie, is_path_allowed_for_scope,
 )
+from services.security import is_standalone
 
 logger = logging.getLogger(__name__)
 
@@ -68,8 +69,9 @@ class HAUserMiddleware(BaseHTTPMiddleware):
             request.state.scope = ExternalScope.FULL.value
             return await call_next(request)
 
-        # 1) Ingress HA
-        ha_user_id = request.headers.get("X-Remote-User-Id")
+        # 1) Ingress HA — ignoré en standalone : sans supervisor devant,
+        # le header est forgeable par n'importe quel client.
+        ha_user_id = None if is_standalone() else request.headers.get("X-Remote-User-Id")
         if ha_user_id:
             ha_username = request.headers.get("X-Remote-User-Name", "Unknown")
             display = request.headers.get("X-Remote-User-Display-Name") or ha_username
@@ -107,7 +109,7 @@ class HAUserMiddleware(BaseHTTPMiddleware):
             status_code=401,
             content={
                 "detail": "Authentification requise.",
-                "hint": "Connecte-toi via Home Assistant (ingress) ou via /api/auth/login/password.",
+                "hint": "Connecte-toi via /api/auth/login/password.",
             },
         )
 
@@ -116,6 +118,9 @@ class HAUserMiddleware(BaseHTTPMiddleware):
         auth = request.headers.get("Authorization", "")
         if auth.lower().startswith("bearer "):
             return auth[7:].strip() or None
+        if is_standalone():
+            # Un token en query string finit dans les logs des proxies
+            return None
         qp = request.query_params.get("token")
         return qp.strip() if qp else None
 

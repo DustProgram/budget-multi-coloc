@@ -66,8 +66,8 @@ export function ExternalLogin({ onAuthed }: { onAuthed: (scope: 'coloc' | 'full'
         </div>
 
         <p className="small muted" style={{ marginTop: 12, marginBottom: 22 }}>
-          Connecte-toi avec tes identifiants externes. Si tu n'en as pas,
-          crée-les via Home Assistant dans <strong>Réglages → Compte externe</strong>.
+          Connecte-toi avec tes identifiants. Si tu n'en as pas, demande à
+          l'administrateur de t'en créer un.
         </p>
 
         <form onSubmit={submit} style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>

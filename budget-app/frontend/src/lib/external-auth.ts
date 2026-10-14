@@ -21,3 +21,12 @@ export function clearLoggedFlag(): void {
 export function hasLoggedFlag(): boolean {
   try { return localStorage.getItem(LOGGED_KEY) === '1'; } catch { return false; }
 }
+
+/** Le service worker met les GET /api en cache (offline). Sur un navigateur
+ *  partagé, il faut le vider à chaque changement de session sinon le
+ *  prochain user verrait les données du précédent. */
+export async function clearApiCache(): Promise<void> {
+  try {
+    if ('caches' in window) await caches.delete('api-get-cache');
+  } catch {}
+}

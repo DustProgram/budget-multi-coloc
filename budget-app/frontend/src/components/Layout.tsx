@@ -91,7 +91,7 @@ export function Layout() {
               <div className="brand-name">
                 Budget Coloc
                 <small>
-                  {isColocSession ? 'Mode coloc' : `HA · v${versionQ.data?.version ?? '...'}`}
+                  {isColocSession ? 'Mode coloc' : `${me.data?.auth_mode === 'standalone' ? '' : 'HA · '}v${versionQ.data?.version ?? '...'}`}
                 </small>
               </div>
               <button className="collapse-btn" onClick={() => setCollapsed(true)} aria-label="Réduire">

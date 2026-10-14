@@ -1,13 +1,17 @@
 # 🤖 Guide pour Claude Code
 
-Add-on Home Assistant **Budget Multi-Coloc** — gestion budgétaire perso + colocation.
-Tout le code de prod vit dans `budget-app/`. Pas de cloud — données sur clé USB LUKS (option) ou `/data` HA standard.
+**Budget Multi-Coloc** — gestion budgétaire perso + colocation.
+Tout le code de prod vit dans `budget-app/`. Depuis 0.12.0, cible principale = **VPS Hostinger KVM 1**
+en mode `AUTH_MODE=standalone` (cf `deploy/README.md`). L'add-on Home Assistant reste fonctionnel mais est mis de côté.
 
 ---
 
-## ⚡ État actuel : 0.11.0 (mai 2026)
+## ⚡ État actuel : 0.12.0 (octobre 2026)
 
-**En production** sur la HA Green de l'utilisateur. Image publiée via GHA Docker sur `ghcr.io/dustprogram/budget-multi-coloc-{arch}`. Tests : **49/49 pytest verts**. Frontend build : OK. Branche actuelle : `main`. Pas de travail en cours.
+Passage en **standalone sur VPS** : `deploy/` (docker-compose app + Caddy HTTPS), `budget-app/Dockerfile.standalone`,
+image `ghcr.io/dustprogram/budget-multi-coloc-standalone` (workflow `build-standalone.yml`).
+Image HA toujours publiée sur `ghcr.io/dustprogram/budget-multi-coloc-{arch}`. Tests : **60/60 pytest verts**.
+Prochaine étape proposée : automatisations (rapprochement relevés ↔ déclarations, n8n, Hermes) → `docs/AUTOMATISATIONS.md`.
 
 ### Comment reprendre
 
@@ -34,6 +38,7 @@ Tout le code de prod vit dans `budget-app/`. Pas de cloud — données sur clé 
 - ✅ **0.8.x** : LLM pluggable 14 providers (anthropic/openai/gemini/mistral/groq/openrouter/deepseek/together/perplexity/fireworks/cerebras/ollama/lmstudio/custom), rate-limit RPM/TPM/RPD, UI Settings LLM in-app, version dynamique, suppression compte cascade/reassign, modal/inputs UX
 - ✅ **0.9.x** : Modèle abondement V2 (charges joint = vraies dépenses + events virtuels `expected_in` qui équilibrent), portée calendrier 1-3 ans, transitions revenu/charge (`/transition` endpoints), `created_at` comme `valid_from` implicite, toggle "exclure ma part des charges joint" du budget perso, virements perso→joint déduits de la marge
 - ✅ **0.10.0** : Cache mémoire 30s sur `compute_monthly_budget` + listener SQLAlchemy auto-invalidation, yearly batch pré-warming, endpoint `/dashboard/balance_at`
+- ✅ **0.12.0** : Mode standalone (sans HA) pour VPS : comptes locaux + admin UI, fixes sécu #56 (rate-limit, lockout, anti-spoofing, headers, cookies, limite payload), docker-compose + Caddy, backups quotidiens
 - ✅ **0.11.0** : Cleanup types legacy coloc frontend, backfill `_backfill_created_at_if_null` retiré, widget alerte retard abondement Dashboard, export CSV/PDF par mois, budgets catégorie avec plafonds mensuels
 
 ---
@@ -47,7 +52,8 @@ Tout le code de prod vit dans `budget-app/`. Pas de cloud — données sur clé 
 - Approche : créer endpoint `/api/intents/{intent_name}` qui mappe aux mêmes tools que `ai_tools.py`, déclarer un fichier d'intents HA dans `config.yaml`.
 
 ### #56 — Fixes sécurité avant exposition Internet
-- Statut : **pending**, audit fait (cf `project_security_audit_pending.md`), fixes pas implémentés.
+- Statut : **✅ livré en 0.12.0** (actif en `AUTH_MODE=standalone`, cf `services/security.py`). Reste : table `LoginLog` (idée #5), révocation serveur des sessions.
+- Historique :
 - L'utilisateur a décidé d'attendre. **Avant toute exposition hors LAN**, faire d'urgence :
   1. **Rate-limit login externe** sur `services/external_auth.py` (5 essais/min/IP)
   2. **Lockout après N échecs** (15min après 10 échecs)
@@ -147,13 +153,19 @@ Tout le code de prod vit dans `budget-app/`. Pas de cloud — données sur clé 
   - `Settings.tsx` : `<CategoryBudgetsCard>` (0.11.0) + `<LLMSettingsCard>` (admin only)
 - Hook `lib/useAutoEdit.ts` : détecte `?edit=N` et auto-ouvre modal
 
+### Mode standalone (0.12.0)
+- `AUTH_MODE=standalone` : header `X-Remote-User-Id` ignoré, `?token=` ignoré, Swagger off, headers sécu + HSTS, cookies Secure/Strict
+- Users locaux : `ha_user_id = "local:<username>"` + `ExternalCredential` (`services/local_users.py`). 1er admin via `ADMIN_USERNAME`/`ADMIN_PASSWORD` si base vide
+- Admin : `GET/POST /api/users/`, `PATCH /api/users/{id}` ; CLI `scripts/create_user.py`
+- Une session `coloc` ne peut ni s'auto-promouvoir `full` ni générer de token legacy
+
 ### Sécurité (état actuel, cf `project_security_audit_pending.md`)
 - ✅ Auth via middleware HA Ingress (`X-Remote-User-Id`)
 - ✅ Port externe `8765` désactivé par défaut, auth username/password + bcrypt + cookies HMAC
 - ✅ SQL Injection → SQLAlchemy ORM (sain)
 - ✅ XSS → React + react-markdown sanitize (sain)
 - ✅ CORS → DEV_MODE only (sain)
-- ⚠️ **PAS de rate-limit login externe** — fix requis si exposition Internet (cf #56)
+- ✅ Rate-limit login 5/min/IP + lockout 15 min après 10 échecs (in-memory, 1 worker)
 
 ---
 
@@ -229,7 +241,7 @@ DEV_MODE=true LLM_API_KEY=... DATABASE_URL="sqlite:///./dev.db?check_same_thread
 # Dev frontend
 cd budget-app/frontend && npm run dev
 
-# Tests backend (49 actuellement)
+# Tests backend (60 actuellement)
 cd budget-app/backend && DEV_MODE=true DATABASE_URL="sqlite:///./test.db" .venv/bin/pytest tests/ -q
 
 # Build frontend

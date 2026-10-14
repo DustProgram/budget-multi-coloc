@@ -302,6 +302,7 @@ export interface Me {
   external_scope: 'coloc' | 'full' | null;
   pro_enabled: boolean;
   session_scope: 'coloc' | 'full';
+  auth_mode?: 'ha' | 'standalone';
 }
 
 // ============================================================
