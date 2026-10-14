@@ -151,3 +151,22 @@ def test_bootstrap_admin(monkeypatch):
     users = db.query(User).all()
     assert len(users) == 1 and users[0].is_admin and users[0].ha_user_id == "local:root"
     db.close()
+
+
+def test_attach_credentials_to_existing_ha_user(client):
+    from services.local_users import attach_credentials
+    db = SessionLocal()
+    try:
+        u = db.query(User).filter(User.ha_user_id == "ha-legacy-user").first()
+        if not u:
+            u = User(ha_user_id="ha-legacy-user", ha_username="legacy", display_name="Legacy")
+            db.add(u)
+            db.commit()
+        attach_credentials(db, u, "legacy-login", "legacy-pass-1", is_admin=True)
+        with pytest.raises(ValueError):
+            attach_credentials(db, u, "autre-login", "legacy-pass-1")
+        uid = u.id
+    finally:
+        db.close()
+    r = _login(client, "legacy-login", "legacy-pass-1")
+    assert r.status_code == 200 and r.json()["user_id"] == uid

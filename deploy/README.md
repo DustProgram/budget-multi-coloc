@@ -64,6 +64,31 @@ docker compose exec app python scripts/create_user.py camille --reset   # mot de
 
 Accès « Coloc » (`--coloc` ou dans l'UI) = courses + chat + récap uniquement.
 
+## 3 bis. Reprendre les données de Home Assistant (optionnel)
+
+Sinon on repart d'une base vide.
+
+1. **Récupérer `budget.db`** depuis HA. Le plus simple : HA → Paramètres → Système → Sauvegardes →
+   sauvegarde partielle avec seulement l'add-on Budget → Télécharger. L'archive contient un
+   `.tar.gz` de l'add-on, avec `data/db/budget.db` dedans.
+   (Si l'option clé USB LUKS était utilisée, la base est sur la clé : `db/budget.db`.)
+2. **L'envoyer sur le VPS** et la mettre en place, **avant** de créer des comptes :
+   ```bash
+   scp budget.db nathan@IP_DU_VPS:/tmp/
+   cd /opt/budget-multi-coloc/deploy
+   docker compose stop app
+   docker compose run --rm -T app sh -c 'cat > /data/db/budget.db && rm -f /data/db/budget.db-wal /data/db/budget.db-shm' < /tmp/budget.db
+   docker compose start app
+   ```
+3. **Donner un identifiant à chaque utilisateur existant**. Les comptes HA n'ont pas de mot de passe,
+   et `ADMIN_USERNAME`/`ADMIN_PASSWORD` est ignoré quand la base contient déjà des utilisateurs :
+   ```bash
+   docker compose exec app python scripts/create_user.py --list
+   docker compose exec app python scripts/create_user.py nathan --user-id 1 --admin
+   docker compose exec app python scripts/create_user.py camille --user-id 2
+   ```
+   Chacun retrouve toutes ses données (comptes, charges, historique).
+
 ## 4. Mettre à jour
 
 ```bash

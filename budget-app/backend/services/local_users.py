@@ -68,12 +68,39 @@ def create_local_user(
     return user
 
 
+def attach_credentials(
+    db: Session, user: User, username: str, password: str,
+    scope: ExternalScope = ExternalScope.FULL, is_admin: Optional[bool] = None,
+) -> User:
+    """Donne un identifiant à un user existant (ex : base reprise de Home Assistant)."""
+    username = validate_username(username)
+    validate_password(password)
+    if db.query(ExternalCredential).filter(ExternalCredential.username == username).first():
+        raise ValueError("Ce username est déjà utilisé.")
+    if db.query(ExternalCredential).filter(ExternalCredential.user_id == user.id).first():
+        raise ValueError("Cet utilisateur a déjà un identifiant (utilise --reset).")
+    db.add(ExternalCredential(
+        user_id=user.id, username=username, password_hash=hash_password(password), scope=scope,
+    ))
+    if is_admin is not None:
+        user.is_admin = is_admin
+    db.commit()
+    return user
+
+
 def ensure_bootstrap_admin() -> None:
     username = os.environ.get("ADMIN_USERNAME", "").strip()
     password = os.environ.get("ADMIN_PASSWORD", "")
     db = SessionLocal()
     try:
         if db.query(User).count() > 0:
+            if db.query(ExternalCredential).count() == 0:
+                logger.warning(
+                    "Base existante (reprise de Home Assistant ?) sans aucun identifiant : "
+                    "personne ne peut se connecter. Lance "
+                    "`python scripts/create_user.py --list` puis "
+                    "`python scripts/create_user.py <username> --user-id <id> --admin`."
+                )
             return
         if not username or not password:
             logger.warning(
